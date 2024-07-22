@@ -1,0 +1,27 @@
+[project]
+name = "dt-browser"
+version = "0.0.1"
+dependencies = [
+    "click",
+    "textual == 0.73.0",
+    "polars >= 1.0,<1.1",
+    "textual-fastdatatable @ file:///home/kyle/git/textual-fastdatatable",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "isort",
+    "pylint",
+]
+
+[project.scripts]
+dtbrowser = "dt_browser.browser:run"
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.isort]
+atomic = true
+profile = "black"
