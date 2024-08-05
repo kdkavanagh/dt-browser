@@ -28,11 +28,6 @@ class PolarsBackend(_BasePolarsBackend):
             rows_to_add = records
         else:
             rows_to_add = pl.from_dicts([dict(zip(self.data.columns, row)) for row in records])
-        # if self.data.columns:
-        #     sel_cols = list([x for x in self.data.columns if x in rows_to_add.columns]) + list(
-        #         [x for x in rows_to_add.columns if x not in self.data.columns]
-        #     )
-        #     rows_to_add = rows_to_add.select(sel_cols)
         indicies = list(range(self.row_count, self.row_count + len(rows_to_add)))
         self.data = pl.concat([self.data, rows_to_add], how="diagonal")
         self._reset_content_widths()

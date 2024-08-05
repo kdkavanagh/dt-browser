@@ -3,9 +3,9 @@ name = "dt-browser"
 version = "0.0.1"
 dependencies = [
     "click",
-    "textual == 0.73.0",
+    "textual == 0.75.0",
     "polars >= 1.0,<1.1",
-    "textual-fastdatatable @ file:///home/kyle/git/textual-fastdatatable",
+    "textual-fastdatatable == 0.9.0",
 ]
 
 [project.optional-dependencies]

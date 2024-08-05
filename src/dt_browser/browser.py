@@ -1,6 +1,4 @@
 import pathlib
-from abc import abstractmethod
-from dataclasses import dataclass
 from typing import ClassVar
 
 import click
@@ -11,49 +9,27 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
-from textual.containers import Horizontal, Vertical
-from textual.message import Message
+from textual.containers import Horizontal
 from textual.reactive import reactive
-from textual.suggester import Suggester
 from textual.widget import Widget
-from textual.widgets import (
-    Footer,
-    Input,
-    Label,
-    ListItem,
-    ListView,
-    Rule,
-    SelectionList,
-)
+from textual.widgets import Footer, Label, SelectionList
 from textual.widgets.selection_list import Selection
 from textual_fastdatatable import DataTable
 
+from dt_browser import (
+    COLOR_COL,
+    COLORS,
+    COLORS_STYLES,
+    INDEX_COL,
+    ReactiveLabel,
+    ReceivesTableSelect,
+    SelectFromTable,
+)
+from dt_browser.bookmarks import Bookmarks
+from dt_browser.column_selector import ColumnSelector
+from dt_browser.filter_box import FilterBox
 from dt_browser.polars_backend import PolarsBackend
-
-_COLORS = pl.Enum(
-    (
-        "#576176",
-        "#FAA5AB",
-        "#A5CD84",
-        "#EFBD58",
-        "#8DC3F1",
-        "#DEAEED",
-        "#27FFDF",
-        "#CACCD3",
-    )
-)
-
-_COLORS_STYLES = "\n".join(
-    f"""
-ExtendedDataTable > .datatable--row{i} {{
-    color: {x};
-}}                        
-"""
-    for i, x in enumerate(_COLORS.categories)
-)
-
-_INDEX_COL = "__index"
-_COLOR_COL = "__color"
+from dt_browser.suggestor import ColumnNameSuggestor
 
 _SHOW_COLUMNS_ID = "showColumns"
 _COLOR_COLUMNS_ID = "colorColumns"
@@ -61,9 +37,9 @@ _COLOR_COLUMNS_ID = "colorColumns"
 
 class ExtendedDataTable(DataTable):
 
-    DEFAULT_CSS = DataTable.DEFAULT_CSS + _COLORS_STYLES
+    DEFAULT_CSS = DataTable.DEFAULT_CSS + COLORS_STYLES
     COMPONENT_CLASSES: ClassVar[set[str]] = DataTable.COMPONENT_CLASSES.union(
-        [f"datatable--row{i}" for i in range(len(_COLORS.categories))]
+        [f"datatable--row{i}" for i in range(len(COLORS.categories))]
     )
 
     def __init__(self, *args, metadata_dt: pl.DataFrame, **kwargs):
@@ -72,464 +48,11 @@ class ExtendedDataTable(DataTable):
 
     def _get_row_style(self, row_index: int, base_style: Style) -> Style:
         style = super()._get_row_style(row_index, base_style)
-        if row_index < 0 or _COLOR_COL not in self.meta_dt.columns:
+        if row_index < 0 or COLOR_COL not in self.meta_dt.columns:
             return style
-        color_idx = self.meta_dt[_COLOR_COL][row_index]
+        color_idx = self.meta_dt[COLOR_COL][row_index]
         row_color = self.get_component_styles(f"datatable--row{color_idx}").rich_style
         return Style.combine([style, row_color])
-
-
-class ColumnNameSuggestor(Suggester):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, case_sensitive=True, **kwargs)
-        self.columns = tuple[str, ...]()
-
-    async def get_suggestion(self, value: str) -> str | None:
-        if not value:
-            return None
-        tokens = value.rsplit(maxsplit=3)
-        last_token = tokens[-1]
-        if len(tokens) > 1:
-            combos = ("and", "or", "AND", "OR")
-            for misc in combos:
-                if misc.startswith(last_token) and tokens[-2] not in combos:
-                    return f"{value}{misc.removeprefix(last_token)}"
-
-        for col in self.columns:
-            if col.startswith(last_token):
-                return f"{value}{col.removeprefix(last_token)}"
-
-        return None
-
-
-class ReceivesTableSelect(Widget):
-
-    BINDINGS = [
-        ("ctrl+t", "select_from_table()", "Select/copy value from table"),
-    ]
-
-    def action_select_from_table(self):
-        self.post_message(SelectFromTable(interested_widget=self))
-
-    @abstractmethod
-    def on_table_select(self, value: str):
-        pass
-
-
-@dataclass
-class SelectFromTable(Message):
-    interested_widget: ReceivesTableSelect
-
-
-class HasState:
-
-    @abstractmethod
-    def save_state(self, existing: dict) -> dict:
-        """
-        Generate any persistent data from this object
-
-        Args:
-            existing: Any existing state for this object which should be merged with the current state.
-            (e.g if there are multiple instances of the browser which should be merged into a single state object)
-        """
-
-    @abstractmethod
-    def load_state(self, state: dict, table_name: str, df: pl.DataFrame):
-        """
-        Apply the provided state to the current object
-
-        Args:
-            state: the state
-            table_name: the current table name being displayed
-            df: The full dataframe being displayed
-        """
-
-
-class FilterBox(ReceivesTableSelect, HasState):
-    DEFAULT_CSS = """
-FilterBox {
-    dock: bottom;
-    height: 15;
-    border: tall white;
-
-}
-
-.filterbox--filterrow {
-    height: 3;
-
-}
-
-.filterbox--input {
-    width: 1fr;
-    margin: 0 1;
-
-}
-
-.filterbox--history {
-    padding: 0 1;
-}
-"""
-
-    BINDINGS = [
-        ("escape", "close()", "Close"),
-        Binding("tab", "toggle_tab()", show=False),
-    ]
-
-    @dataclass
-    class FilterSubmitted(Message):
-        value: str | None
-
-    @dataclass
-    class GoToSubmitted(Message):
-        value: str | None
-
-    is_goto = reactive(False)
-
-    def __init__(self, *args, suggestor: Suggester | None = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._history: list[str] = []
-        self._active_filter: dict[bool, str | None] = {True: None, False: None}
-        self._suggestor = suggestor
-
-    def save_state(self, existing: dict) -> dict:
-        history = self._history.copy()
-        for x in existing["history"]:
-            if x not in history:
-                history.append(x)
-        return {"history": history}
-
-    def load_state(self, state: dict, *_):
-        self._history = state["history"]
-
-    def query_failed(self, query: str):
-        self._history.remove(query)
-        for child in self.walk_children(ListItem):
-            if child.name == query:
-                child.remove()
-
-    def on_table_select(self, value: str):
-        box = self.query_one(Input)
-        box.value = f"{box.value}{value}"
-        box.focus()
-
-    @on(Input.Submitted)
-    async def apply_filter(self, event: Input.Submitted):
-        new_value = event.value
-        if new_value == self._active_filter[self.is_goto]:
-            return
-
-        the_list = self.query_one(ListView)
-        if new_value:
-            self.query_one(Input).value = new_value
-            if new_value not in self._history:
-                self._history.append(new_value)
-                the_list.index = None
-                await the_list.insert(0, [ListItem(Label(new_value), name=new_value)])
-                the_list.index = 0
-        else:
-            the_list.index = None
-        self._active_filter[self.is_goto] = new_value
-        if self.is_goto:
-            msg = FilterBox.GoToSubmitted(value=new_value)
-        else:
-            msg = FilterBox.FilterSubmitted(value=new_value)
-        self.post_message(msg)
-
-    @on(ListView.Selected)
-    def input_historical(self, event: ListView.Selected):
-        box = self.query_one(Input)
-        box.value = event.item.name
-        box.focus()
-
-    def key_down(self):
-        if not (box := self.query_one(ListView)).has_focus and box.children:
-            box.focus()
-
-    def action_toggle_tab(self):
-        if not (box := self.query_one(Input)).has_focus:
-            box.focus()
-        if box._suggestion:  # pylint: disable=protected-access
-            box.action_cursor_right()
-
-    def action_close(self):
-        self.remove()
-
-    def compose(self):
-        if self.is_goto:
-            self.border_title = "Search dataframe"
-        else:
-            self.border_title = "Filter dataframe"
-
-        with Vertical():
-            with Horizontal(classes="filterbox--filterrow"):
-                yield Input(
-                    value=self._active_filter[self.is_goto],
-                    classes="filterbox--input",
-                    suggester=self._suggestor,
-                )
-            yield Rule()
-            yield ListView(
-                *(ListItem(Label(x), name=x) for x in reversed(self._history)),
-                classes="filterbox--history",
-            )
-
-    def on_mount(self):
-        self.query_one(Input).focus()
-        idx = None
-        if self._active_filter[self.is_goto] and self._active_filter[self.is_goto] in self._history:
-            idx = len(self._history) - (self._history.index(self._active_filter[self.is_goto]) + 1)
-        self.query_one(ListView).index = idx
-
-
-class Bookmarks(Widget):
-
-    @dataclass
-    class BookmarkSelected(Message):
-        selected_index: int
-
-    DEFAULT_CSS = """
-    Bookmarks {
-        dock: bottom;
-        height: 15;
-        border: tall white;
-
-    }
-
-    .bookmarks--history {
-        padding: 0 1;
-    }
-    """
-
-    BINDINGS = [
-        ("escape", "close()", "Close"),
-        ("delete", "remove_bookmark()", "Remove bookmark"),
-    ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._bookmark_df = PolarsBackend(pl.DataFrame())
-        self._history: dict[str, list[int]] = {}
-        self._meta_dt = pl.DataFrame()
-
-    # def save_state(self, existing: dict):
-    #     max_history = 10
-    #     history = self._history.copy()
-    #     for k, v in existing[history]:
-    #         if k not in history:
-    #             history[k] = v
-
-    #     if len(history) > max_history:
-    #         history = {k: v for k, v in list(history.items())[-max_history:]}
-    #     return {"history": {**history, self._table_name: self._bookmark_df.data[_INDEX_COL].to_dict()}}
-
-    # def load_state(self, state: dict, table_name: str, df: pl.DataFrame):
-    #     self._history = state["history"]
-    #     if self._table_name in self._history:
-    #         self.add_bookmark(df[*state["history"][table_name]])
-
-    def compose(self):
-        yield DataTable(backend=self._bookmark_df, cursor_type="row", max_rows=5)
-
-    def add_bookmark(self, df: pl.DataFrame, meta_df: pl.DataFrame):
-        self._bookmark_df.append_rows(df)
-        self._meta_dt = pl.concat([self._meta_dt, meta_df])
-
-    @property
-    def has_bookmarks(self):
-        print(self._bookmark_df.data)
-        return not self._bookmark_df.data.is_empty()
-
-    def action_close(self):
-        self.remove()
-
-    def on_mount(self):
-        self.query_one(DataTable).focus()
-
-    def action_remove_bookmark(self):
-        dt = self.query_one(DataTable)
-        if len(self._bookmark_df.data) == 1:
-            self._bookmark_df.drop_row(0)
-            self.remove()
-        else:
-            dt.remove_row(dt.cursor_row)
-
-    @on(DataTable.RowSelected)
-    def handle_select(self, event: DataTable.RowSelected):
-        sel_row = event.cursor_row
-        index = int(self._meta_dt[sel_row][_INDEX_COL][0])
-        self.post_message(Bookmarks.BookmarkSelected(selected_index=index))
-
-
-class ColumnSelector(Widget, HasState):
-
-    DEFAULT_CSS = """
-    ColumnSelector {
-        dock: right;
-
-    }
-    """
-
-    BINDINGS = [
-        ("escape", "close()", "Close"),
-        ("shift+up", "move(True)", "Move up"),
-        ("shift+down", "move(False)", "Move Down"),
-    ]
-
-    @dataclass
-    class ColumnSelectionChanged(Message):
-        selected_columns: tuple[str, ...]
-        selector: "ColumnSelector"
-
-        @property
-        def control(self):
-            return self.selector
-
-    available_columns: reactive[tuple[str, ...]] = reactive(tuple())
-    selected_columns: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
-    display_columns: reactive[tuple[str, ...]] = reactive(tuple(), init=False, bindings=True)
-
-    def __init__(self, *args, title: str | None = None, allow_reorder: bool = True, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._allow_reorder = allow_reorder
-        self._title = title
-
-    def action_close(self):
-        self.remove()
-
-    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action == "move":
-            if not self.display_columns or not self._allow_reorder:
-                return False
-            cur_idx = self.query_one(SelectionList).highlighted
-            if cur_idx is None:
-                return False
-            if parameters[0]:
-                return cur_idx > 0
-            return cur_idx < len(self.display_columns) - 1
-        return True
-
-    @on(SelectionList.SelectionHighlighted)
-    def _refresh_actions(self):
-        self.refresh_bindings()
-
-    def _refresh_options(self):
-        sel_list = self.query_one(SelectionList)
-        sel_idx = sel_list.highlighted
-        if sel_idx is not None:
-            sel_val: str | None = sel_list.get_option_at_index(sel_idx).value
-        else:
-            sel_val = None
-        sel_list.clear_options()
-        for i, x in enumerate(self.display_columns):
-            sel_list.add_option(Selection(x, x, x in self.selected_columns))
-            if x == sel_val:
-                sel_list.highlighted = i
-
-    def action_move(self, is_up: bool):
-        sel_list = self.query_one(SelectionList)
-        if (idx := sel_list.highlighted) is None:
-            return
-        if is_up:
-            self.display_columns = (
-                self.display_columns[0 : idx - 1]
-                + (self.display_columns[idx], self.display_columns[idx - 1])
-                + self.display_columns[idx + 1 :]
-            )
-        else:
-            self.display_columns = (
-                self.display_columns[0:idx]
-                + (self.display_columns[idx + 1], self.display_columns[idx])
-                + self.display_columns[idx + 2 :]
-            )
-        self._refresh_options()
-
-    def watch_available_columns(self):
-        new_disp = []
-        for x in self.available_columns:
-            if x not in self.display_columns:
-                new_disp.append(x)
-        if new_disp:
-            self.display_columns = self.display_columns + tuple(new_disp)
-        self.styles.width = max(max([len(x) for x in self.available_columns] + [0]) + 10, 35)
-
-    def watch_display_columns(self):
-        self.selected_columns = [x for x in self.display_columns if x in self.selected_columns]
-        self._refresh_options()
-
-    def watch_selected_columns(self):
-        self.post_message(ColumnSelector.ColumnSelectionChanged(selected_columns=self.selected_columns, selector=self))
-
-    def save_state(self, *_) -> dict:
-        return {"selected": self.selected_columns}
-
-    def load_state(self, state: dict):
-        self.selected_columns = tuple(x for x in state["selected"] if x in self.available_columns)
-
-    def on_mount(self):
-        (sel := self.query_one(SelectionList)).focus()
-        sel.highlighted = 0
-
-    def compose(self):
-        sel = SelectionList[int](
-            *(Selection(x, x, x in self.selected_columns) for x in self.display_columns),
-        )
-
-        sel.border_title = self._title
-        yield sel
-
-    @on(SelectionList.SelectedChanged)
-    def on_column_selection(self, event: SelectionList.SelectedChanged):
-        event.stop()
-        sels = event.selection_list.selected
-        self.selected_columns = [x for x in self.display_columns if x in sels]
-
-
-class FooterRowCount(Widget):
-
-    DEFAULT_CSS = """
-    FooterRowCount {
-        background: $accent-darken-1;
-        width: auto;
-        height: 1;
-
-        padding: 0 2;
-    }
-
-    FooterRowCount > .tablefooter--label {
-        background: $secondary;
-        text-style: bold;
-    }
-
-    """
-
-    is_filtered = reactive(False)
-    cur_row = reactive(1)
-    cur_total_rows = reactive(0)
-    total_rows = reactive(0)
-
-    def render(self):
-        text = Text(
-            no_wrap=True,
-            overflow="ellipsis",
-            justify="right",
-            end="",
-        )
-        # key_style = self.get_component_rich_style("footerrowcount--rowcount")
-        key_text = Text.assemble(str(self.cur_row), "/", str(self.cur_total_rows))
-        if self.cur_total_rows != self.total_rows:
-            key_text = Text.assemble(key_text, " (", str(self.total_rows), ")")
-        text.append(key_text)
-        return text
-
-
-class ReactiveLabel(Label):
-
-    value: reactive[str] = reactive("", layout=True)
-
-    def render(self):
-        if isinstance(self.value, (int, float)):
-            return f"{self.value:,}"
-        return str(self.value)
 
 
 class TableFooter(Footer):
@@ -643,7 +166,7 @@ layers: regular above;
         self._source = source_file
 
         self._display_dt = self._filtered_dt = self._original_dt = PolarsBackend.from_file_path(self._source).data
-        self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=_INDEX_COL).select([_INDEX_COL])
+        self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
         self._suggestor = ColumnNameSuggestor()
@@ -688,7 +211,7 @@ layers: regular above;
             await self._set_filtered_dt(
                 self._original_dt,
                 self._original_meta,
-                new_row=self._meta_dt[_INDEX_COL][idx],
+                new_row=self._meta_dt[INDEX_COL][idx],
                 focus=False,
             )
         else:
@@ -716,7 +239,7 @@ layers: regular above;
         try:
             ctx = pl.SQLContext(frames={"dt": (pl.concat([self._display_dt, self._meta_dt], how="horizontal"))})
             search_queue = list(
-                ctx.execute(f"select {_INDEX_COL} from dt where {self.active_search}").collect()[_INDEX_COL]
+                ctx.execute(f"select {INDEX_COL} from dt where {self.active_search}").collect()[INDEX_COL]
             )
             if not search_queue:
                 self.notify("No results found for search", severity="warn", timeout=5)
@@ -800,7 +323,7 @@ layers: regular above;
         coord = dt.cursor_coordinate
         sel_idx = event.selected_index
         if self.is_filtered:
-            filt = self._meta_dt.with_row_index("__displayIndex").filter(pl.col(_INDEX_COL) == sel_idx)
+            filt = self._meta_dt.with_row_index("__displayIndex").filter(pl.col(INDEX_COL) == sel_idx)
             if filt.is_empty():
                 self.notify(
                     "Bookmark not present in filtered view.  Remove filters to select this bookmark",
@@ -868,8 +391,8 @@ layers: regular above;
 
     async def watch_color_by(self):
         if not self.color_by:
-            self._meta_dt = self._meta_dt.drop(_COLOR_COL, strict=False)
-            self._original_meta = self._original_meta.drop(_COLOR_COL, strict=False)
+            self._meta_dt = self._meta_dt.drop(COLOR_COL, strict=False)
+            self._original_meta = self._original_meta.drop(COLOR_COL, strict=False)
         else:
             cols = tuple(self.color_by)
             if cols not in self._color_by_cache:
@@ -878,13 +401,13 @@ layers: regular above;
                     self._original_dt.with_columns(
                         __color=(
                             (pl.any_horizontal(*(pl.col(x) != pl.col(x).shift(1) for x in cols))).cum_sum().fill_null(0)
-                            % len(_COLORS.categories)
+                            % len(COLORS.categories)
                         )
-                    )[_COLOR_COL],
+                    )[COLOR_COL],
                 )
             self._original_meta = self._original_meta.with_columns(__color=self._color_by_cache.get(cols))
-            self._meta_dt = self._meta_dt.drop(_COLOR_COL, strict=False).join(
-                self._original_meta.select([_INDEX_COL, _COLOR_COL]), how="left", on=_INDEX_COL
+            self._meta_dt = self._meta_dt.drop(COLOR_COL, strict=False).join(
+                self._original_meta.select([INDEX_COL, COLOR_COL]), how="left", on=INDEX_COL
             )
 
         await self._redraw(focus=False)
@@ -937,4 +460,4 @@ def run(source_file: pathlib.Path):
 
 
 if __name__ == "__main__":
-    run()
+    run()  # pylint: disable=no-value-for-parameter
