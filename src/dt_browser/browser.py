@@ -1,16 +1,18 @@
+import asyncio
 import pathlib
 from typing import ClassVar
 
 import click
 import polars as pl
+from rich.spinner import Spinner
 from rich.style import Style
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
 from textual.containers import Horizontal
 from textual.reactive import reactive
-from textual.widgets import Footer, Label
+from textual.widgets import Footer, Label, Static
 from textual_fastdatatable import DataTable
 
 from dt_browser import (
@@ -53,6 +55,19 @@ class ExtendedDataTable(DataTable):
         return Style.combine([style, row_color])
 
 
+class SpinnerWidget(Static):
+    def __init__(self, style: str):
+        super().__init__("")
+        self._spinner = Spinner(style)
+        self.styles.width = 1
+
+    def on_mount(self) -> None:
+        self.update_render = self.set_interval(1 / 60, self.update_spinner)
+
+    def update_spinner(self) -> None:
+        self.update(self._spinner)
+
+
 class TableFooter(Footer):
     DEFAULT_CSS = """
     TableFooter > .tablefooter--rowcount {
@@ -72,13 +87,14 @@ class TableFooter(Footer):
     }
 
     """
-
+    filter_pending = reactive(False, recompose=True)
     is_filtered = reactive(False)
     cur_row = reactive(1)
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
     total_rows_display = reactive("", layout=True)
 
+    search_pending: reactive[bool] = reactive(False, recompose=True)
     active_search_queue: reactive[list[int] | None] = reactive(None)
     active_search_idx: reactive[int | None] = reactive(None)
     active_search_idx_display: reactive[int | None] = reactive(None)
@@ -95,18 +111,28 @@ class TableFooter(Footer):
         widths = ["auto"] * self.styles.grid_size_columns
         yield Label()
         widths.append("1fr")
-        if self.active_search_len is not None:
+        if self.search_pending:
+            widths.append("auto")
+            with Horizontal(classes="tablefooter--search"):
+                yield Label("Searching ")
+                yield SpinnerWidget("dots")
+        elif self.active_search_len is not None:
             widths.append("auto")
             with Horizontal(classes="tablefooter--search"):
                 yield Label("Search: ")
                 yield ReactiveLabel().data_bind(value=TableFooter.active_search_idx)
                 yield Label(" / ")
                 yield ReactiveLabel().data_bind(value=TableFooter.active_search_len)
+
         with Horizontal(classes="tablefooter--rowcount"):
             yield ReactiveLabel().data_bind(value=TableFooter.cur_row)
             yield Label(" / ")
             yield ReactiveLabel().data_bind(value=TableFooter.cur_total_rows)
             yield ReactiveLabel().data_bind(value=TableFooter.total_rows_display)
+            if self.filter_pending:
+                yield Label(" Filtering ")
+                yield SpinnerWidget("dots")
+
         widths.append("auto")
         self.styles.grid_columns = " ".join(widths)
         self.styles.grid_size_columns = len(widths)
@@ -131,7 +157,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         ("c", "column_selector", "Columns..."),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
     ]
-
 
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
     visible_columns: reactive[tuple[str, ...]] = reactive(tuple())
@@ -189,6 +214,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self._suggestor.columns = self.visible_columns
 
     @on(FilterBox.FilterSubmitted)
+    @work(exclusive=True)
     async def apply_filter(self, event: FilterBox.FilterSubmitted):
         if not event.value:
             self.is_filtered = False
@@ -200,32 +226,41 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 focus=False,
             )
         else:
+            (foot := self.query_one(TableFooter)).filter_pending = True
             ctx = pl.SQLContext(frames={"dt": pl.concat([self._original_dt, self._original_meta], how="horizontal")})
             try:
-                dt = ctx.execute(f"select * from dt where {event.value}").collect()
+                dt = await ctx.execute(f"select * from dt where {event.value}").collect_async()
                 meta = dt.select([x for x in dt.columns if x.startswith("__")])
                 dt = dt.select([x for x in dt.columns if not x.startswith("__")])
                 self.is_filtered = True
-                await self._set_filtered_dt(dt, meta, new_row=0, focus=False)
+                if dt.is_empty():
+                    self.notify(f"No results found for filter: {event.value}", severity="warn", timeout=5)
+                else:
+                    await self._set_filtered_dt(dt, meta, new_row=0, focus=False)
             except Exception as e:
                 self.query_one(FilterBox).query_failed(event.value)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
+            foot.filter_pending = False
 
     @on(FilterBox.GoToSubmitted)
     async def apply_search(self, event: FilterBox.GoToSubmitted):
         self.active_search = event.value
 
-    def watch_active_search(self):
+    @work(exclusive=True)
+    async def watch_active_search(self):
         if not self.active_search:
             self.active_search_queue = None
             self.active_search_idx = 0
             return
 
+        (foot := self.query_one(TableFooter)).search_pending = True
         try:
             ctx = pl.SQLContext(frames={"dt": (pl.concat([self._display_dt, self._meta_dt], how="horizontal"))})
             search_queue = list(
-                ctx.execute(f"select {INDEX_COL} from dt where {self.active_search}").collect()[INDEX_COL]
+                (await ctx.execute(f"select {INDEX_COL} from dt where {self.active_search}").collect_async())[INDEX_COL]
             )
+
+            foot.search_pending = False
             if not search_queue:
                 self.notify("No results found for search", severity="warn", timeout=5)
             else:
@@ -234,7 +269,8 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 self.action_iter_search(True)
         except Exception as e:
             self.query_one(FilterBox).query_failed(self.active_search)
-            self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
+            self.notify(f"Failed to run search due to: {e}", severity="error", timeout=10)
+            foot.search_pending = False
 
     def action_iter_search(self, forward: bool):
         table = self.query_one(ExtendedDataTable)
@@ -275,7 +311,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     async def _set_active_dt(self, active_dt: pl.DataFrame, **kwargs):
         self._display_dt = active_dt.select(self.visible_columns)
         self.cur_total_rows = len(self._display_dt)
-        self.watch_active_search()
+        self.watch_active_search.__wrapped__(self)
         await self._redraw(**kwargs)
 
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_SHOW_COLUMNS_ID}")
