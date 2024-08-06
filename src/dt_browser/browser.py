@@ -4,16 +4,13 @@ from typing import ClassVar
 import click
 import polars as pl
 from rich.style import Style
-from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
 from textual.containers import Horizontal
 from textual.reactive import reactive
-from textual.widget import Widget
-from textual.widgets import Footer, Label, SelectionList
-from textual.widgets.selection_list import Selection
+from textual.widgets import Footer, Label
 from textual_fastdatatable import DataTable
 
 from dt_browser import (
@@ -45,6 +42,7 @@ class ExtendedDataTable(DataTable):
     def __init__(self, *args, metadata_dt: pl.DataFrame, **kwargs):
         super().__init__(*args, **kwargs)
         self.meta_dt = metadata_dt
+        self.styles.height = "1fr"
 
     def _get_row_style(self, row_index: int, base_style: Style) -> Style:
         style = super()._get_row_style(row_index, base_style)
@@ -134,19 +132,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
     ]
 
-    DEFAULT_CSS = """
-DtBrowser {
-layers: regular above;
-}
-.dock-bottom {
-    dock: bottom;
-}
-
-.dtbrowser--toolbox {
-    height: 15;
-}
-
-"""
 
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
     visible_columns: reactive[tuple[str, ...]] = reactive(tuple())
@@ -350,21 +335,6 @@ layers: regular above;
             return
         self._filter_box.is_goto = True
         await self.mount(self._filter_box, before=self.query_one(TableFooter))
-
-    async def action_show_color_select(self):
-        if existing := self.query("#color_select"):
-            self.color_by = set(next(iter(existing.results(SelectionList))).selected)
-            existing.remove()
-            return
-
-        sel = SelectionList[int](
-            *(Selection(x, x, x in self.color_by) for i, x in enumerate(self._backend.data.columns)),
-            id="color_select",
-            classes="dock-bottom toolbox",
-        )
-        sel.border_title = "Color rows by column(s)"
-        await self.mount(sel, before=self.query_one(TableFooter))
-        sel.focus(True)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Check if an action may run."""

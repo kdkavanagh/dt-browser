@@ -14,7 +14,6 @@ from dt_browser import HasState, ReceivesTableSelect
 class FilterBox(ReceivesTableSelect, HasState):
     DEFAULT_CSS = """
 FilterBox {
-    dock: bottom;
     height: 15;
     border: tall white;
 
