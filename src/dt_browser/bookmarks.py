@@ -16,6 +16,10 @@ class Bookmarks(Widget):
     class BookmarkSelected(Message):
         selected_index: int
 
+    @dataclass
+    class BookmarkRemoved(Message):
+        selected_index: int
+
     DEFAULT_CSS = """
     Bookmarks {
         dock: bottom;
@@ -57,15 +61,19 @@ class Bookmarks(Widget):
     #         self.add_bookmark(df[*state["history"][table_name]])
 
     def compose(self):
-        yield DataTable(backend=self._bookmark_df, cursor_type="row", max_rows=5)
+        dt = DataTable(backend=self._bookmark_df, cursor_type="row", max_rows=5)
+        dt.styles.height = "auto"
+        yield dt
 
     def add_bookmark(self, df: pl.DataFrame, meta_df: pl.DataFrame):
+        if not self._meta_dt.is_empty() and meta_df[INDEX_COL][0] in self._meta_dt[INDEX_COL]:
+            return False
         self._bookmark_df.append_rows(df)
         self._meta_dt = pl.concat([self._meta_dt, meta_df])
+        return True
 
     @property
     def has_bookmarks(self):
-        print(self._bookmark_df.data)
         return not self._bookmark_df.data.is_empty()
 
     def action_close(self):
@@ -76,11 +84,17 @@ class Bookmarks(Widget):
 
     def action_remove_bookmark(self):
         dt = self.query_one(DataTable)
+        idx = self._meta_dt[dt.cursor_row][INDEX_COL][0]
         if len(self._bookmark_df.data) == 1:
             self._bookmark_df.drop_row(0)
+            self._meta_dt = self._meta_dt.clear()
             self.remove()
         else:
             dt.remove_row(dt.cursor_row)
+            above = self._meta_dt.slice(0, dt.cursor_row)
+            below = self._meta_dt.slice(dt.cursor_row + 1)
+            self._meta_dt = pl.concat([above, below])
+        self.post_message(Bookmarks.BookmarkRemoved(selected_index=idx))
 
     @on(DataTable.RowSelected)
     def handle_select(self, event: DataTable.RowSelected):

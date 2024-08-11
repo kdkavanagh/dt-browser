@@ -13,6 +13,7 @@ from textual.cache import LRUCache
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widgets import Footer, Label, Static
+from textual.worker import Worker, WorkerState
 from textual_fastdatatable import DataTable
 
 from dt_browser import (
@@ -36,23 +37,37 @@ _COLOR_COLUMNS_ID = "colorColumns"
 
 class ExtendedDataTable(DataTable):
 
-    DEFAULT_CSS = DataTable.DEFAULT_CSS + COLORS_STYLES
+    DEFAULT_CSS = DataTable.DEFAULT_CSS + COLORS_STYLES + """
+
+ExtendedDataTable > .datatable--row-bookmark {
+    background: $error-lighten-3;
+}
+"""
+    
     COMPONENT_CLASSES: ClassVar[set[str]] = DataTable.COMPONENT_CLASSES.union(
         [f"datatable--row{i}" for i in range(len(COLORS.categories))]
-    )
+    ).union([
+        "datatable--row-bookmark"
+    ])
 
-    def __init__(self, *args, metadata_dt: pl.DataFrame, **kwargs):
+    def __init__(self, *args, metadata_dt: pl.DataFrame, bookmarks: Bookmarks, **kwargs):
         super().__init__(*args, **kwargs)
         self.meta_dt = metadata_dt
+        self._bookmarks=bookmarks
         self.styles.height = "1fr"
 
     def _get_row_style(self, row_index: int, base_style: Style) -> Style:
         style = super()._get_row_style(row_index, base_style)
-        if row_index < 0 or COLOR_COL not in self.meta_dt.columns:
-            return style
-        color_idx = self.meta_dt[COLOR_COL][row_index]
-        row_color = self.get_component_styles(f"datatable--row{color_idx}").rich_style
-        return Style.combine([style, row_color])
+        styles=[style]
+        if row_index >= 0 and COLOR_COL in self.meta_dt.columns:
+            color_idx = self.meta_dt[COLOR_COL][row_index]
+            styles.append(self.get_component_styles(f"datatable--row{color_idx}").rich_style)
+        
+        if not self._bookmarks._meta_dt.is_empty():
+            idx = self.meta_dt[row_index][INDEX_COL][0]
+            if idx in self._bookmarks._meta_dt[INDEX_COL]:
+                styles.append(self.get_component_styles(f"datatable--row-bookmark").rich_style)
+        return Style.combine(styles)
 
 
 class SpinnerWidget(Static):
@@ -80,6 +95,11 @@ class TableFooter(Footer):
         width: auto;
         padding: 0 2;
     }
+    TableFooter > .tablefooter--pending {
+        background: $secondary-darken-1;
+        width: auto;
+        padding: 0 2;
+    }
 
     FooterRowCount > .tablefooter--label {
         background: $secondary;
@@ -93,6 +113,8 @@ class TableFooter(Footer):
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
     total_rows_display = reactive("", layout=True)
+
+    pending_action = reactive("", recompose=True)
 
     search_pending: reactive[bool] = reactive(False, recompose=True)
     active_search_queue: reactive[list[int] | None] = reactive(None)
@@ -111,6 +133,12 @@ class TableFooter(Footer):
         widths = ["auto"] * self.styles.grid_size_columns
         yield Label()
         widths.append("1fr")
+        if self.pending_action:
+            widths.append("auto")
+            with Horizontal(classes="tablefooter--pending"):
+                yield ReactiveLabel().data_bind(value=TableFooter.pending_action)
+                yield Label(" ")
+                yield SpinnerWidget("dots")
         if self.search_pending:
             widths.append("auto")
             with Horizontal(classes="tablefooter--search"):
@@ -134,6 +162,7 @@ class TableFooter(Footer):
                 yield SpinnerWidget("dots")
 
         widths.append("auto")
+        print(widths)
         self.styles.grid_columns = " ".join(widths)
         self.styles.grid_size_columns = len(widths)
 
@@ -191,7 +220,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         )
 
         # self.set_reactive(DtBrowser.color_by, self._backend.columns[0:1])
-        self.color_by = tuple(self._backend.columns[0:1])
 
         self._color_by_cache: LRUCache[tuple[str, ...], pl.Series] = LRUCache(5)
 
@@ -236,7 +264,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 if dt.is_empty():
                     self.notify(f"No results found for filter: {event.value}", severity="warn", timeout=5)
                 else:
-                    await self._set_filtered_dt(dt, meta, new_row=0, focus=False)
+                    await self._set_filtered_dt(dt, meta, new_row=0, focus=None)
             except Exception as e:
                 self.query_one(FilterBox).query_failed(event.value)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
@@ -286,9 +314,11 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
     def action_add_bookmark(self):
         row_idx = self.query_one(ExtendedDataTable).cursor_coordinate.row
-        self._bookmarks.add_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
-        self.refresh_bindings()
-        self.notify("Bookmark added!", severity="information", timeout=3)
+        if self._bookmarks.add_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx]):
+            (dt:=self.query_one(ExtendedDataTable))._clear_caches()
+            dt.refresh_row(row_idx)
+            self.refresh_bindings()
+            self.notify("Bookmark added!", severity="information", timeout=3)
 
     async def action_show_bookmarks(self):
         await self.mount(self._bookmarks, before=self.query_one(TableFooter))
@@ -358,6 +388,11 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         dt.scroll_to(xs, ys, animate=False, force=True)
         dt.move_cursor(column=coord.column, row=sel_idx)
 
+    @on(Bookmarks.BookmarkRemoved)
+    def handle_bookmark_removed(self, event: Bookmarks.BookmarkRemoved):
+        self.query_one(ExtendedDataTable)._clear_caches()
+        self.refresh_bindings()
+
     async def action_show_filter(self):
         if existing := self.query("#filter"):
             existing.remove()
@@ -395,40 +430,50 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
         return True
 
+    @work(exclusive=True)
     async def watch_color_by(self):
         if not self.color_by:
             self._meta_dt = self._meta_dt.drop(COLOR_COL, strict=False)
             self._original_meta = self._original_meta.drop(COLOR_COL, strict=False)
         else:
-            cols = tuple(self.color_by)
-            if cols not in self._color_by_cache:
-                self._color_by_cache.set(
-                    cols,
-                    self._original_dt.with_columns(
-                        __color=(
-                            (pl.any_horizontal(*(pl.col(x) != pl.col(x).shift(1) for x in cols))).cum_sum().fill_null(0)
-                            % len(COLORS.categories)
-                        )
-                    )[COLOR_COL],
-                )
-            self._original_meta = self._original_meta.with_columns(__color=self._color_by_cache.get(cols))
-            self._meta_dt = self._meta_dt.drop(COLOR_COL, strict=False).join(
-                self._original_meta.select([INDEX_COL, COLOR_COL]), how="left", on=INDEX_COL
-            )
+            (foot := self.query_one(TableFooter)).pending_action = "Recoloring"
+            try:
+                cols = tuple(sorted(self.color_by))
+                if cols not in self._color_by_cache:
+                    self._color_by_cache.set(
+                        cols,
+                        (await self._original_dt.lazy().with_columns(
+                            __color=(
+                                (pl.any_horizontal(*(pl.col(x) != pl.col(x).shift(1) for x in cols))).cum_sum().fill_null(0)
+                                % len(COLORS.categories)
+                            )
+                        ).collect_async())[COLOR_COL],
+                    )
+                self._original_meta = self._original_meta.with_columns(__color=self._color_by_cache.get(cols))
+                self._meta_dt = await self._meta_dt.lazy().drop(COLOR_COL, strict=False).join(
+                    self._original_meta.lazy().select([INDEX_COL, COLOR_COL]), how="left", on=INDEX_COL
+                ).collect_async()
+                await asyncio.sleep(5)
+            except Exception as e:
+                self.notify(f"Failed to apply coloring due to: {e}", severity="error", timeout=10)
+            foot.pending_action = None
+        
+        await self._redraw(focus=None)
 
-        await self._redraw(focus=False)
 
-    async def _redraw(self, new_row: int | None = None, focus: bool = True):
+    async def _redraw(self, new_row: int | None = None, focus: bool | None = True):
         self._backend = PolarsBackend.from_dataframe(self._display_dt)
         existing_q = self.query(ExtendedDataTable)
         if not existing_q:
             return
         existing = existing_q.only_one()
+        if focus is None:
+            focus = existing.has_focus
         coord = existing.cursor_coordinate
         ys = new_row if new_row is not None else existing.scroll_y
         xs = existing.scroll_x
         await existing.remove()
-        dt = ExtendedDataTable(backend=self._backend, id="table", metadata_dt=self._meta_dt)
+        dt = ExtendedDataTable(backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks)
         await self.mount(dt, before=0)
 
         if focus:
@@ -441,13 +486,15 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             self.cur_row = new_row
 
     def on_mount(self):
+        self.app._driver._disable_mouse_support() 
+        #self.color_by = tuple(self._backend.columns[0:1])
         self.cur_total_rows = len(self._display_dt)
         self.total_rows = len(self._original_dt)
         self.cur_row = 1
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield ExtendedDataTable(backend=self._backend, id="table", metadata_dt=self._meta_dt)
+        yield ExtendedDataTable(backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks)
         yield TableFooter().data_bind(
             DtBrowser.cur_row,
             DtBrowser.cur_total_rows,
