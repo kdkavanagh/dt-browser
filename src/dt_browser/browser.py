@@ -164,7 +164,6 @@ class TableFooter(Footer):
                 yield SpinnerWidget("dots")
 
         widths.append("auto")
-        print(widths)
         self.styles.grid_columns = " ".join(widths)
         self.styles.grid_size_columns = len(widths)
 
@@ -509,7 +508,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                     .join(self._original_meta.lazy().select([INDEX_COL, COLOR_COL]), how="left", on=INDEX_COL)
                     .collect_async()
                 )
-                await asyncio.sleep(5)
             except Exception as e:
                 self.notify(f"Failed to apply coloring due to: {e}", severity="error", timeout=10)
             foot.pending_action = None

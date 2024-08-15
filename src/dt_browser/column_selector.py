@@ -20,7 +20,8 @@ class ColumnSelector(Widget, HasState):
     """
 
     BINDINGS = [
-        ("escape", "close()", "Close"),
+        ("escape", "close()", "Close and Apply"),
+        ("a", "apply()", "Apply"),
         ("shift+up", "move(True)", "Move up"),
         ("shift+down", "move(False)", "Move Down"),
     ]
@@ -42,9 +43,16 @@ class ColumnSelector(Widget, HasState):
         super().__init__(*args, **kwargs)
         self._allow_reorder = allow_reorder
         self._title = title
+        self._message: ColumnSelector.ColumnSelectionChanged | None = None
 
     def action_close(self):
+        self.action_apply()
         self.remove()
+
+    def action_apply(self):
+        if self._message is not None:
+            self.post_message(self._message)
+            self._message = None
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "move":
@@ -107,7 +115,7 @@ class ColumnSelector(Widget, HasState):
         self._refresh_options()
 
     def watch_selected_columns(self):
-        self.post_message(ColumnSelector.ColumnSelectionChanged(selected_columns=self.selected_columns, selector=self))
+        self._message = ColumnSelector.ColumnSelectionChanged(selected_columns=self.selected_columns, selector=self)
 
     def save_state(self, *_) -> dict:
         return {"selected": self.selected_columns}
