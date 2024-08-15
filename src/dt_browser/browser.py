@@ -174,7 +174,7 @@ class TableFooter(Footer):
         return self.active_search_idx + 1
 
 
-class RowDetail(Widget):
+class RowDetail(Widget, can_focus=False, can_focus_children=False):
 
     DEFAULT_CSS = """
 RowDetail {
