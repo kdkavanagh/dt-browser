@@ -33,7 +33,7 @@ class PolarsBackend(_BasePolarsBackend):
         self.data = pl.concat([self.data, rows_to_add], how="diagonal")
         self._reset_content_widths()
         return indicies
-    
+
     def _measure(self, arr: pl.Series) -> int:
         dtype = arr.dtype
         if dtype == pld.Categorical() and arr.cat.get_categories().is_empty():

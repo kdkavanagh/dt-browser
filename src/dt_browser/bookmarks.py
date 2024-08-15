@@ -65,8 +65,9 @@ class Bookmarks(Widget):
         dt.styles.height = "auto"
         yield dt
 
-    def add_bookmark(self, df: pl.DataFrame, meta_df: pl.DataFrame):
+    def toggle_bookmark(self, df: pl.DataFrame, meta_df: pl.DataFrame):
         if not self._meta_dt.is_empty() and meta_df[INDEX_COL][0] in self._meta_dt[INDEX_COL]:
+            self.remove_bookmark(meta_df[INDEX_COL][0])
             return False
         self._bookmark_df.append_rows(df)
         self._meta_dt = pl.concat([self._meta_dt, meta_df])
@@ -79,21 +80,33 @@ class Bookmarks(Widget):
     def action_close(self):
         self.remove()
 
-    def on_mount(self):
+    async def on_mount(self):
         self.query_one(DataTable).focus()
 
     def action_remove_bookmark(self):
         dt = self.query_one(DataTable)
         idx = self._meta_dt[dt.cursor_row][INDEX_COL][0]
+        self.remove_bookmark(idx)
+
+    def remove_bookmark(self, idx: int):
+        dt = self.query(DataTable)
         if len(self._bookmark_df.data) == 1:
             self._bookmark_df.drop_row(0)
             self._meta_dt = self._meta_dt.clear()
-            self.remove()
+            if dt:
+                self.remove()
         else:
-            dt.remove_row(dt.cursor_row)
-            above = self._meta_dt.slice(0, dt.cursor_row)
-            below = self._meta_dt.slice(dt.cursor_row + 1)
+            if dt:
+                rem_row = dt.first().cursor_row
+                dt.first().remove_row(rem_row)
+            else:
+                rem_row = self._meta_dt.with_row_index(name="__tmp").filter(pl.col(INDEX_COL) == idx)["__tmp"][0]
+                self._bookmark_df.drop_row(rem_row)
+
+            above = self._meta_dt.slice(0, rem_row)
+            below = self._meta_dt.slice(rem_row + 1)
             self._meta_dt = pl.concat([above, below])
+
         self.post_message(Bookmarks.BookmarkRemoved(selected_index=idx))
 
     @on(DataTable.RowSelected)

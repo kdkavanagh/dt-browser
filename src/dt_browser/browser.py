@@ -212,7 +212,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         ("/", "show_search", "Search"),
         ("n", "iter_search(True)", "Next"),
         Binding("N", "iter_search(False)", "Prev", key_display="shift+N"),
-        ("b", "add_bookmark", "Add Bookmark"),
+        ("b", "toggle_bookmark", "Add/Del Bookmark"),
         Binding("B", "show_bookmarks", "Bookmarks", key_display="shift+B"),
         ("c", "column_selector", "Columns..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
@@ -347,13 +347,13 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             table.move_cursor(column=coord.column, row=next_idex)
         self.refresh_bindings()
 
-    def action_add_bookmark(self):
+    def action_toggle_bookmark(self):
         row_idx = self.query_one(ExtendedDataTable).cursor_coordinate.row
-        if self._bookmarks.add_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx]):
-            (dt := self.query_one(ExtendedDataTable))._clear_caches()
-            dt.refresh_row(row_idx)
-            self.refresh_bindings()
-            self.notify("Bookmark added!", severity="information", timeout=3)
+        did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
+        (dt := self.query_one(ExtendedDataTable))._clear_caches()
+        dt.refresh_row(row_idx)
+        self.refresh_bindings()
+        self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
 
     async def action_toggle_row_detail(self):
         self.show_row_detail = not self.show_row_detail
