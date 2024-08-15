@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import polars as pl
+import polars.datatypes as pld
 from textual_fastdatatable.backend import PolarsBackend as _BasePolarsBackend
 
 
@@ -32,3 +33,9 @@ class PolarsBackend(_BasePolarsBackend):
         self.data = pl.concat([self.data, rows_to_add], how="diagonal")
         self._reset_content_widths()
         return indicies
+    
+    def _measure(self, arr: pl.Series) -> int:
+        dtype = arr.dtype
+        if dtype == pld.Categorical() and arr.cat.get_categories().is_empty():
+            return len("<null>")
+        return super()._measure(arr)
