@@ -194,7 +194,10 @@ RowDetail {
             return
         dt = DataTable(
             backend=PolarsBackend.from_dataframe(
-                self.row_df.transpose(include_header=True, header_name="Field", column_names=["Value"])
+                self.row_df.with_columns([
+    pl.col(col).cast(pl.Utf8) if dtype == pl.Categorical else pl.col(col)
+    for col, dtype in zip(self.row_df.columns, self.row_df.dtypes)
+]).transpose(include_header=True, header_name="Field", column_names=["Value"])
             ),
             show_cursor=False,
             show_header=False,
