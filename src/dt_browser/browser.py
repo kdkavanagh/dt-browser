@@ -1,5 +1,6 @@
-import asyncio
+import gc
 import pathlib
+import time
 from typing import ClassVar
 
 import click
@@ -7,6 +8,7 @@ import polars as pl
 from rich.spinner import Spinner
 from rich.style import Style
 from textual import on, work
+from textual._context import message_hook
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
@@ -265,6 +267,15 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         # self.set_reactive(DtBrowser.color_by, self._backend.columns[0:1])
 
         self._color_by_cache: LRUCache[tuple[str, ...], pl.Series] = LRUCache(5)
+        self._last_message_ts = time.time()
+
+    def _set_last_message(self, *_):
+        self._last_message_ts = time.time()
+
+    def _maybe_gc(self):
+        if time.time() - self._last_message_ts > 3:
+            self.app.log("Triggering GC!")
+            gc.collect()
 
     # def save_state(self):
     #     return {
@@ -448,6 +459,17 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self.refresh_bindings()
 
     async def action_show_filter(self):
+        # import gc
+        # gc.set_debug(gc.DEBUG_SAVEALL)
+        # def print_gc(*_):
+        #     by_typ = {}
+        #     for x in gc.garbage:
+        #         r = by_typ.setdefault(type(x), 1)
+        #         by_typ[type(x)] = r + 1
+        #     for x, k in reversed(sorted(by_typ.items(), key=lambda v: v[1])):
+        #         print(f"{x}={k}")
+        # gc.callbacks.append(print_gc)
+
         if existing := self.query("#filter"):
             existing.remove()
             return
@@ -547,12 +569,13 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             self.cur_row = new_row
 
     def on_mount(self):
-        self.app._driver._disable_mouse_support()
-        # self.color_by = tuple(self._backend.columns[0:1])
         self.cur_total_rows = len(self._display_dt)
         self.total_rows = len(self._original_dt)
         self.cur_row = 1
         self._row_detail.row_df = self._display_dt[0]
+        gc.disable()
+        self.set_interval(3, self._maybe_gc)
+        message_hook.set(self._set_last_message)
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -574,7 +597,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 @click.argument("source_file", nargs=1, required=True, type=pathlib.Path)
 def run(source_file: pathlib.Path):
     app = DtBrowser(source_file, source_file)
-    app.run()
+    app.run(mouse=False)
 
 
 if __name__ == "__main__":
