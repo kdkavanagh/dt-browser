@@ -239,11 +239,14 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     active_search: reactive[str | None] = reactive(None)
     # active_dt: reactive[pl.DataFrame] = reactive(pl.DataFrame(), init=False, always_update=True)
 
-    def __init__(self, table_name: str, source_file: pathlib.Path):
+    def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
-        self._source = source_file
-
-        self._display_dt = self._filtered_dt = self._original_dt = PolarsBackend.from_file_path(self._source).data
+        bt = (
+            PolarsBackend.from_file_path(self._source)
+            if isinstance(source_file_or_table, (str, pathlib.Path))
+            else PolarsBackend.from_dataframe(source_file_or_table)
+        )
+        self._display_dt = self._filtered_dt = self._original_dt = bt.data
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
