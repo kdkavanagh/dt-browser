@@ -244,7 +244,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
         bt = (
-            PolarsBackend.from_file_path(self._source)
+            PolarsBackend.from_file_path(source_file_or_table)
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else PolarsBackend.from_dataframe(source_file_or_table)
         )
