@@ -433,6 +433,10 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
             .collect()["segements"]
         )
+        for line in self._lines:
+            for x in line._segments:
+                if x.text is None:
+                    raise Exception(f"Bad segment for line {line}")
 
         return super().render_lines(crop)
 
