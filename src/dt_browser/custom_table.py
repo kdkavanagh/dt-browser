@@ -354,7 +354,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 concat = pl.concat_str(
                     [self._formatters[x] for x in cols],
                     separator=" ",
-                ).fill_null("")
+                    ignore_nulls=True
+                )
             if pad:
                 concat = concat.str.pad_end(needed_padding)
 
