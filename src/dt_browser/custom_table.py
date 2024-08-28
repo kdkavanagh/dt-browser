@@ -288,8 +288,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         if dtype == pld.Categorical():
             dtype = pl.Utf8
         if dtype.is_numeric() or dtype.is_temporal():
-            return pl.col(col).cast(pl.Utf8).str.pad_start(self._widths[col])
-        return pl.col(col).cast(pl.Utf8).str.pad_end(self._widths[col])
+            return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_start(self._widths[col])
+        return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_end(self._widths[col])
 
     def _build_base_header(self, cols_to_render: list[str]):
         base_header = [v for k, v in self._header.items() if k in cols_to_render] + self._header_pad
