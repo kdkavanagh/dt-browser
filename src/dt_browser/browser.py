@@ -29,6 +29,7 @@ from dt_browser import (
 )
 from dt_browser.bookmarks import Bookmarks
 from dt_browser.column_selector import ColumnSelector
+from dt_browser.custom_table import CustomTable
 from dt_browser.filter_box import FilterBox
 from dt_browser.polars_backend import PolarsBackend
 from dt_browser.suggestor import ColumnNameSuggestor
@@ -486,7 +487,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Check if an action may run."""
         # self.query(".toolbox")
-        if not (edtq := self.query(ExtendedDataTable)):
+        if not (edtq := self.query(CustomTable)):
             return False
 
         if not edtq.only_one().has_focus and action in (
@@ -574,15 +575,16 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self.cur_row = 1
         self._row_detail.row_df = self._display_dt[0]
         gc.disable()
-        self.set_interval(3, self._maybe_gc)
-        message_hook.set(self._set_last_message)
+        # self.set_interval(3, self._maybe_gc)
+        # message_hook.set(self._set_last_message)
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         with Horizontal(id="main_hori"):
-            yield ExtendedDataTable(
-                backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks
-            )
+            yield CustomTable(self._backend.data, metadata_dt=self._meta_dt)
+            # yield ExtendedDataTable(
+            #    backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks
+            # )
         yield TableFooter().data_bind(
             DtBrowser.cur_row,
             DtBrowser.cur_total_rows,
