@@ -301,7 +301,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     async def apply_filter(self, event: FilterBox.FilterSubmitted):
         if not event.value:
             self.is_filtered = False
-            idx = self.query_one(ExtendedDataTable).cursor_coordinate.row
+            idx = self.query_one(CustomTable).cursor_coordinate.row
             await self._set_filtered_dt(
                 self._original_dt,
                 self._original_meta,
@@ -356,7 +356,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             foot.search_pending = False
 
     def action_iter_search(self, forward: bool):
-        table = self.query_one(ExtendedDataTable)
+        table = self.query_one(CustomTable)
         coord = table.cursor_coordinate
         self.active_search_idx += 1 if forward else -1
         if self.active_search_idx >= 0 and self.active_search_idx < len(self.active_search_queue):
@@ -368,9 +368,9 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self.refresh_bindings()
 
     def action_toggle_bookmark(self):
-        row_idx = self.query_one(ExtendedDataTable).cursor_coordinate.row
+        row_idx = self.query_one(CustomTable).cursor_coordinate.row
         did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
-        (dt := self.query_one(ExtendedDataTable))._clear_caches()
+        (dt := self.query_one(CustomTable))._clear_caches()
         dt.refresh_row(row_idx)
         self.refresh_bindings()
         self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
@@ -421,22 +421,22 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     @on(SelectFromTable)
     def enable_select_from_table(self, event: SelectFromTable):
         self._select_interest = f"#{event.interested_widget.id}"
-        self.query_one(ExtendedDataTable).focus()
+        self.query_one(CustomTable).focus()
 
-    @on(ExtendedDataTable.CellHighlighted)
-    async def handle_cell_highlight(self, event: ExtendedDataTable.CellHighlighted):
+    @on(CustomTable.CellHighlighted)
+    async def handle_cell_highlight(self, event: CustomTable.CellHighlighted):
         self.cur_row = event.coordinate.row
         self._row_detail.row_df = self._display_dt[self.cur_row]
 
-    @on(ExtendedDataTable.CellSelected)
-    def handle_cell_select(self, event: ExtendedDataTable.CellSelected):
+    @on(CustomTable.CellSelected)
+    def handle_cell_select(self, event: CustomTable.CellSelected):
         if self._select_interest:
             self.query_one(self._select_interest, ReceivesTableSelect).on_table_select(event.value)
             self._select_interest = None
 
     @on(Bookmarks.BookmarkSelected)
     def handle_bookmark_select(self, event: Bookmarks.BookmarkSelected):
-        dt = self.query_one(ExtendedDataTable)
+        dt = self.query_one(CustomTable)
         coord = dt.cursor_coordinate
         sel_idx = event.selected_index
         if self.is_filtered:
@@ -456,7 +456,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
     @on(Bookmarks.BookmarkRemoved)
     def handle_bookmark_removed(self, event: Bookmarks.BookmarkRemoved):
-        self.query_one(ExtendedDataTable)._clear_caches()
+        self.query_one(CustomTable)._clear_caches()
         self.refresh_bindings()
 
     async def action_show_filter(self):
@@ -543,11 +543,13 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 self.notify(f"Failed to apply coloring due to: {e}", severity="error", timeout=10)
             foot.pending_action = None
 
-        await self._redraw(focus=None)
+        self.query_one(CustomTable).set_metadata(self._meta_dt)
+
+        # await self._redraw(focus=None)
 
     async def _redraw(self, new_row: int | None = None, focus: bool | None = True):
         self._backend = PolarsBackend.from_dataframe(self._display_dt)
-        existing_q = self.query(ExtendedDataTable)
+        existing_q = self.query(CustomTable)
         if not existing_q:
             return
         existing = existing_q.only_one()
