@@ -268,6 +268,12 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self._color_selector = ColumnSelector(
             allow_reorder=False, id=_COLOR_COLUMNS_ID, title="Select columns to color by"
         )
+
+        # Necessary to prevent the main table from resizing to 0 when the col selectors are mounted and then immediately resizing
+        # (apparently that happens when col selector width = auto)
+        self._color_selector.styles.width = 1
+        self._column_selector.styles.width = 1
+
         self._row_detail = RowDetail()
 
         # self.set_reactive(DtBrowser.color_by, self._backend.columns[0:1])

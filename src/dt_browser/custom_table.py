@@ -377,6 +377,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 x_offset = 0
             case "enter":
                 self._post_cell_event(CustomTable.CellSelected)
+                event.stop()
+                return
             case _:
                 return
 
@@ -419,7 +421,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
             cols_to_render: list[str] = []
             min_col_idx: int | None = None
-            effective_width = self.window_region.width - scroll_bar_width
+            effective_width = self.scrollable_content_region.width
             for i, x in enumerate(self._dt.columns):
                 min_offset = self._cum_widths[x] - scroll_x
                 max_offset = min_offset + self._widths[x]
@@ -432,7 +434,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 cols_to_render.append(x)
                 if min_col_idx is None:
                     min_col_idx = i
-
+            if min_col_idx is None:
+                min_col_idx = 0
             cursor_col_idx = self.cursor_coordinate.column - min_col_idx
 
             dt_height = self.window_region.height - HEADER_HEIGHT
@@ -498,6 +501,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
         return self._render_header_and_table
 
+    def _get_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+        return (
+            pl.when(pl.col("index") == cursor_row_idx)
+            .then(pl.lit(self._row_col_highlight.bgcolor.name))
+            .otherwise(pl.lit(None))
+            .alias("bgcolor")
+        )
+
     def render_lines(self, crop: Region):
         if self._render_header_and_table and self.scrollable_content_region.height - HEADER_HEIGHT != len(
             self._render_header_and_table
@@ -516,12 +527,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             Strip(x, cell_length=self.scrollable_content_region.width - scroll_bar_width)
             for x in render_df.lazy()
             .select(
-                segements=pl.struct(
+                segments=pl.struct(
                     pl.col("*"),
-                    pl.when(pl.col("index") == cursor_row_idx)
-                    .then(pl.lit(self._row_col_highlight.bgcolor.name))
-                    .otherwise(pl.lit(None))
-                    .alias("bgcolor"),
+                    self._get_bg_color_expr(cursor_row_idx),
                 ).map_elements(
                     lambda struct: [
                         Segment(
@@ -555,9 +563,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     return_dtype=pl.Object,
                 )
             )
-            .collect()["segements"]
+            .collect()["segments"]
         )
-
 
         return super().render_lines(crop)
 

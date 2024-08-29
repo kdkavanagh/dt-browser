@@ -15,7 +15,6 @@ class ColumnSelector(Widget, HasState):
     DEFAULT_CSS = """
     ColumnSelector {
         dock: right;
-
     }
     """
 
