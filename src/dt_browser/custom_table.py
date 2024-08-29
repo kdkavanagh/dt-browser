@@ -79,15 +79,7 @@ def measure_width(obj: object, console: Console) -> int:
     return console.measure(renderable).maximum
 
 
-def _get_color_escape(hex_str: str | tuple[int, int, int], background=False):
-    if isinstance(hex_str, str):
-        r, g, b = [int(x, 16) for x in re.findall("..", hex_str.removeprefix("#"))]
-    else:
-        r, g, b = hex_str
-    return "\033[{};2;{};{};{}m".format(48 if background else 38, r, g, b)
-
-
-_colors = pl.Enum((_get_color_escape(x) for x in COLORS.categories))
+HEADER_HEIGHT = 1
 
 
 class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
@@ -163,8 +155,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     CustomTable {
         background: $surface ;
         color: $text;
-        height: auto;
-        max-height: 100vh;
     }
     CustomTable > .datatable--header {
         text-style: bold;
@@ -224,7 +214,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._header_pad = [Segment(" ", style=self._header_style)]
 
         _, header_width = self._build_base_header(self._dt.columns)
-        self.virtual_size = Size(header_width, len(self._dt))
+        self.virtual_size = Size(header_width, len(self._dt) + HEADER_HEIGHT)
 
     def set_metadata(self, metadata_dt: pl.DataFrame):
         self._metadata_dt = metadata_dt
@@ -249,7 +239,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
     def _find_minimal_x_offset(self, coordinate: Coordinate):
         col_name = self._dt.columns[coordinate.column]
-        effective_width = self.container_size.width - 2
+        effective_width = self.scrollable_content_region.width - 2
         padding = 1
         free_space = effective_width - (self._widths[col_name] + padding)
 
@@ -277,8 +267,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return False
         return True
 
-    def move_cursor(self, column: int, row: int):
-        self.go_to_cell(Coordinate(row=row, column=column))
+    def move_cursor(self, column: int | None, row: int | None):
+        self.go_to_cell(
+            Coordinate(
+                row=self.cursor_coordinate.row if row is None else row,
+                column=self.cursor_coordinate.column if column is None else column,
+            )
+        )
 
     def go_to_cell(self, coordinate: Coordinate):
         cur_visible = self._is_coordinate_visible(coordinate)
@@ -297,16 +292,16 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         else:
             self.refresh(repaint=True)
 
-    async def _on_idle(self, _: events.Idle) -> None:
-        _, header_width = self._build_base_header(self._dt.columns)
-        self.virtual_size = Size(header_width, len(self._dt))
+    # async def _on_idle(self, _: events.Idle) -> None:
+    #     _, header_width = self._build_base_header(self._dt.columns)
+    #     self.virtual_size = Size(header_width, len(self._dt))
 
     def on_resize(self, event: events.Resize):
         # Check maxmimal selection of new size
+        if event.size.width == 0:
+            return
         self._render_header_and_table = None
-        self.refresh()
-        return
-        max_idx = 0
+        max_idx = len(self._cum_widths) - 1
         for i, (k, x) in enumerate(self._cum_widths.items()):
             if (x + self._widths[k]) >= (event.size.width - 2):
                 max_idx = i - 1
@@ -336,30 +331,28 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     def on_key(self, event: events.Key) -> None:
         x_offset, y_offset = self.scroll_offset
         requires_prep = True
+        effective_height = self.scrollable_content_region.height - HEADER_HEIGHT
+        old_cursor = self.cursor_coordinate
         match event.key:
             case "down":
                 self.cursor_coordinate = Coordinate(
-                    min(len(self._dt), self.cursor_coordinate.row + 1), self.cursor_coordinate.column
+                    min(len(self._dt) - 1, self.cursor_coordinate.row + 1), self.cursor_coordinate.column
                 )
-                y_offset += 1
                 requires_prep = False
             case "up":
                 self.cursor_coordinate = Coordinate(
                     max(0, self.cursor_coordinate.row - 1), self.cursor_coordinate.column
                 )
-                y_offset -= 1
                 requires_prep = False
             case "pageup":
                 self.cursor_coordinate = Coordinate(
-                    max(0, self.cursor_coordinate.row - self.container_size.height), self.cursor_coordinate.column
+                    max(0, self.cursor_coordinate.row - effective_height), self.cursor_coordinate.column
                 )
-                y_offset = self.cursor_coordinate.row
             case "pagedown":
                 self.cursor_coordinate = Coordinate(
-                    min(len(self._dt), self.cursor_coordinate.row + self.container_size.height),
+                    min(len(self._dt) - 1, self.cursor_coordinate.row + effective_height),
                     self.cursor_coordinate.column,
                 )
-                y_offset = self.cursor_coordinate.row
             case "left":
                 self.cursor_coordinate = Coordinate(
                     self.cursor_coordinate.row, max(0, self.cursor_coordinate.column - 1)
@@ -372,7 +365,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 )
                 col_name = self._dt.columns[self.cursor_coordinate.column]
                 max_offset = self._cum_widths[col_name] + self._widths[col_name]
-                effective_width = self.container_size.width - 2
+                effective_width = self.scrollable_content_region.width - 2
                 if max_offset >= x_offset + effective_width:
                     x_offset = self._find_minimal_x_offset(self.cursor_coordinate)
 
@@ -387,8 +380,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             case _:
                 return
 
+        y_offset += self.cursor_coordinate.row - old_cursor.row
+
         if (
-            self.cursor_coordinate.row >= (self.scroll_offset[1] + self.window_region.height - 2)
+            self.cursor_coordinate.row
+            >= (self.scroll_offset[1] + self.scrollable_content_region.height - HEADER_HEIGHT)
             or self.cursor_coordinate.row < self.scroll_offset[1]
             or x_offset != self.scroll_offset[0]
         ):
@@ -431,7 +427,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     continue
 
                 if max_offset >= effective_width:
-                    print(f"i={i} x={x} MAX OFFSET {max_offset}, {effective_width}")
                     break
 
                 cols_to_render.append(x)
@@ -440,7 +435,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
             cursor_col_idx = self.cursor_coordinate.column - min_col_idx
 
-            dt_height = self.window_region.height - 1
+            dt_height = self.window_region.height - HEADER_HEIGHT
+
             base_header, header_width = self._build_base_header(cols_to_render)
             excess = self.window_region.width - header_width - scroll_bar_width
             header = Strip(base_header + (self._header_pad * (excess)))
@@ -503,6 +499,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         return self._render_header_and_table
 
     def render_lines(self, crop: Region):
+        if self._render_header_and_table and self.scrollable_content_region.height - HEADER_HEIGHT != len(
+            self._render_header_and_table
+        ):
+            # if we get rendered before the resize event is passed to us
+            self._render_header_and_table = None
         cur_header, render_df = self.render_table_and_header
 
         self._lines.clear()
@@ -512,7 +513,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         scroll_bar_width = 2
         cursor_row_idx = self.cursor_coordinate.row - scroll_y
         self._lines.extend(
-            Strip(x, cell_length=crop.width - scroll_bar_width)
+            Strip(x, cell_length=self.scrollable_content_region.width - scroll_bar_width)
             for x in render_df.lazy()
             .select(
                 segements=pl.struct(
@@ -556,6 +557,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
             .collect()["segements"]
         )
+
 
         return super().render_lines(crop)
 

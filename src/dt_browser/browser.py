@@ -114,10 +114,12 @@ class TableFooter(Footer):
     """
     filter_pending = reactive(False, recompose=True)
     is_filtered = reactive(False)
-    cur_row = reactive(1)
+    cur_row = reactive(0)
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
     total_rows_display = reactive("", layout=True)
+
+    cur_row_display = reactive(0)
 
     pending_action = reactive("", recompose=True)
 
@@ -131,6 +133,9 @@ class TableFooter(Footer):
         if self.active_search_queue is None:
             return None
         return len(self.active_search_queue)
+
+    def compute_cur_row_display(self):
+        return self.cur_row + 1
 
     def compose(self):
         yield from super().compose()
@@ -158,7 +163,7 @@ class TableFooter(Footer):
                 yield ReactiveLabel().data_bind(value=TableFooter.active_search_len)
 
         with Horizontal(classes="tablefooter--rowcount"):
-            yield ReactiveLabel().data_bind(value=TableFooter.cur_row)
+            yield ReactiveLabel().data_bind(value=TableFooter.cur_row_display)
             yield Label(" / ")
             yield ReactiveLabel().data_bind(value=TableFooter.cur_total_rows)
             yield ReactiveLabel().data_bind(value=TableFooter.total_rows_display)
@@ -231,7 +236,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     visible_columns: reactive[tuple[str, ...]] = reactive(tuple())
     all_columns: reactive[tuple[str, ...]] = reactive(tuple())
     is_filtered = reactive(False)
-    cur_row = reactive(1)
+    cur_row = reactive(0)
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
 
@@ -249,7 +254,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else PolarsBackend.from_dataframe(source_file_or_table)
         )
-        self._display_dt = self._filtered_dt = self._original_dt = bt.data
+        self._display_dt = self._filtered_dt = self._original_dt = bt.data.with_row_index(name="row")
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
@@ -306,7 +311,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 self._original_dt,
                 self._original_meta,
                 new_row=self._meta_dt[INDEX_COL][idx],
-                focus=False,
             )
         else:
             (foot := self.query_one(TableFooter)).filter_pending = True
@@ -319,7 +323,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 if dt.is_empty():
                     self.notify(f"No results found for filter: {event.value}", severity="warn", timeout=5)
                 else:
-                    await self._set_filtered_dt(dt, meta, new_row=0, focus=None)
+                    await self._set_filtered_dt(dt, meta, new_row=0)
             except Exception as e:
                 self.query_one(FilterBox).query_failed(event.value)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
@@ -403,11 +407,14 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self._meta_dt = filtered_meta
         await self._set_active_dt(self._filtered_dt, **kwargs)
 
-    async def _set_active_dt(self, active_dt: pl.DataFrame, **kwargs):
+    async def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
         self._display_dt = active_dt.select(self.visible_columns)
         self.cur_total_rows = len(self._display_dt)
         self.watch_active_search.__wrapped__(self)
-        await self._redraw(**kwargs)
+        (table := self.query_one(CustomTable)).set_dt(self._display_dt, self._meta_dt)
+        if new_row is not None:
+            table.move_cursor(row=new_row, column=None)
+            self.cur_row = new_row
 
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_SHOW_COLUMNS_ID}")
     async def reorder_columns(self, event: ColumnSelector.ColumnSelectionChanged):
@@ -545,36 +552,9 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
         self.query_one(CustomTable).set_metadata(self._meta_dt)
 
-        # await self._redraw(focus=None)
-
-    async def _redraw(self, new_row: int | None = None, focus: bool | None = True):
-        self._backend = PolarsBackend.from_dataframe(self._display_dt)
-        existing_q = self.query(CustomTable)
-        if not existing_q:
-            return
-        existing = existing_q.only_one()
-        if focus is None:
-            focus = existing.has_focus
-        coord = existing.cursor_coordinate
-        ys = new_row if new_row is not None else existing.scroll_y
-        xs = existing.scroll_x
-        await existing.remove()
-        dt = ExtendedDataTable(backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks)
-        await self.query_one("#main_hori", Horizontal).mount(dt, before=0)
-
-        if focus:
-            dt.focus()
-        with self.app.batch_update():
-            dt.scroll_to(xs, ys, animate=False, force=True)
-            dt.move_cursor(column=coord.column, row=new_row if new_row is not None else coord.row)
-
-        if new_row is not None:
-            self.cur_row = new_row
-
     def on_mount(self):
         self.cur_total_rows = len(self._display_dt)
         self.total_rows = len(self._original_dt)
-        self.cur_row = 1
         self._row_detail.row_df = self._display_dt[0]
         gc.disable()
         # self.set_interval(3, self._maybe_gc)
