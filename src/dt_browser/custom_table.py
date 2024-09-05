@@ -191,6 +191,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._row_col_highlight: Style | None = None
 
         self._header: dict[str, Segment] = {}
+        self._header_pad: list[Segment] = []
 
         self._render_header_and_table: tuple[Strip, pl.DataFrame] | None = None
 
@@ -200,6 +201,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._cell_highlight = self.get_component_rich_style("datatable--cursor")
         self._header_style = self.get_component_rich_style("datatable--header")
         self._row_col_highlight = self.get_component_rich_style("datatable--even-row")
+        self._header_pad = [Segment(" ", style=self._header_style)]
         self._build_header_contents()
 
     def _build_header_contents(self):
@@ -207,11 +209,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             x.strip(): Segment(f" {x}", style=self._header_style)
             for x in (
                 pl.DataFrame({x: [x] for x in self._dt.columns})
-                .with_columns(self._formatters.values())[0]
+                .with_columns(self._formatters.values())
+                .slice(0, 1)
                 .transpose()["column_0"]
             )
         }
-        self._header_pad = [Segment(" ", style=self._header_style)]
 
         _, header_width = self._build_base_header(self._dt.columns)
         self.virtual_size = Size(header_width, len(self._dt) + HEADER_HEIGHT)

@@ -313,7 +313,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         if not event.value:
             self.is_filtered = False
             idx = self.query_one(CustomTable).cursor_coordinate.row
-            await self._set_filtered_dt(
+            self._set_filtered_dt(
                 self._original_dt,
                 self._original_meta,
                 new_row=self._meta_dt[INDEX_COL][idx],
@@ -329,7 +329,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 if dt.is_empty():
                     self.notify(f"No results found for filter: {event.value}", severity="warn", timeout=5)
                 else:
-                    await self._set_filtered_dt(dt, meta, new_row=0)
+                    self._set_filtered_dt(dt, meta, new_row=0)
             except Exception as e:
                 self.query_one(FilterBox).query_failed(event.value)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
@@ -408,12 +408,12 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self._color_selector.data_bind(selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns)
         await self.query_one("#main_hori", Horizontal).mount(self._color_selector)
 
-    async def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
+    def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
         self._filtered_dt = filtered_dt
         self._meta_dt = filtered_meta
-        await self._set_active_dt(self._filtered_dt, **kwargs)
+        self._set_active_dt(self._filtered_dt, **kwargs)
 
-    async def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
+    def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
         self._display_dt = active_dt.select(self.visible_columns)
         self.cur_total_rows = len(self._display_dt)
         self.watch_active_search.__wrapped__(self)
@@ -423,9 +423,9 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             self.cur_row = new_row
 
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_SHOW_COLUMNS_ID}")
-    async def reorder_columns(self, event: ColumnSelector.ColumnSelectionChanged):
+    def reorder_columns(self, event: ColumnSelector.ColumnSelectionChanged):
         self.visible_columns = tuple(event.selected_columns)
-        await self._set_active_dt(self._filtered_dt, focus=False)
+        self._set_active_dt(self._filtered_dt)
 
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_COLOR_COLUMNS_ID}")
     async def set_color_by(self, event: ColumnSelector.ColumnSelectionChanged):
