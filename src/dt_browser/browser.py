@@ -380,8 +380,6 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def action_toggle_bookmark(self):
         row_idx = self.query_one(CustomTable).cursor_coordinate.row
         did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
-        (dt := self.query_one(CustomTable))._clear_caches()
-        dt.refresh_row(row_idx)
         self.refresh_bindings()
         self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
 
