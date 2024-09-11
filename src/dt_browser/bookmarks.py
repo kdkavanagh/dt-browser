@@ -49,6 +49,10 @@ class Bookmarks(Widget):
         self._history: dict[str, list[int]] = {}
         self._meta_dt = pl.DataFrame()
 
+    @property
+    def meta_dt(self):
+        return self._meta_dt
+
     # def save_state(self, existing: dict):
     #     max_history = 10
     #     history = self._history.copy()

@@ -31,6 +31,7 @@ ExtendedDataTable > .datatable--row{i} {{
 
 INDEX_COL = "__index"
 COLOR_COL = "__color"
+DISPLAY_IDX_COL = "_display_index"
 
 
 class HasState:

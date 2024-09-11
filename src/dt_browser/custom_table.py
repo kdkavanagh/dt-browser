@@ -25,7 +25,7 @@ from textual.reactive import Reactive
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
 
-from dt_browser import COLOR_COL, COLORS
+from dt_browser import COLOR_COL, COLORS, DISPLAY_IDX_COL, INDEX_COL
 
 
 def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> RenderableType:
@@ -457,14 +457,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             excess = self.window_region.width - header_width - scroll_bar_width
             header = Strip(base_header + (self._header_pad * (excess)))
 
-            rend = self._dt.slice(scroll_y, dt_height)
+            rend = self._dt.lazy()
 
             visible_cols = cols_to_render.copy()
 
             if COLOR_COL in self._metadata_dt.columns:
-                row_colors = self._metadata_dt.slice(scroll_y, dt_height).select(
-                    (pl.col(COLOR_COL).cast(COLORS).alias(COLOR_COL))
-                )
+                row_colors = self._metadata_dt.lazy().select((pl.col(COLOR_COL).cast(COLORS).alias(COLOR_COL)))
                 cols_to_render.insert(0, COLOR_COL)
                 rend = rend.with_columns(row_colors)
 
@@ -495,11 +493,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self._render_header_and_table = (
                 header,
                 (
-                    rend.lazy()
-                    .select(cols_to_render)
-                    .with_row_index()
+                    rend.select(cols_to_render)
+                    .with_columns(self._metadata_dt[INDEX_COL])
+                    .slice(scroll_y, dt_height)
+                    .with_row_index(DISPLAY_IDX_COL)
                     .select(
-                        pl.col("index"),
+                        pl.col(DISPLAY_IDX_COL),
+                        pl.col(INDEX_COL),
                         (
                             pl.col(COLOR_COL)
                             if COLOR_COL in cols_to_render
@@ -514,9 +514,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
         return self._render_header_and_table
 
-    def _get_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+    def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
         return (
-            pl.when(pl.col("index") == cursor_row_idx)
+            pl.when(pl.col(DISPLAY_IDX_COL) == cursor_row_idx)
             .then(
                 pl.lit(
                     self._row_col_highlight.bgcolor.name
@@ -525,7 +525,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 )
             )
             .otherwise(pl.lit(None))
-            .alias("bgcolor")
+        )
+
+    def _get_sel_col_bg_color(self, struct: pl.Struct):
+        return (
+            self._row_col_highlight.bgcolor.name
+            if self._cursor_type == CustomTable.CursorType.CELL
+            else struct["bgcolor"]
         )
 
     def render_lines(self, crop: Region):
@@ -549,7 +555,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 .select(
                     segments=pl.struct(
                         pl.col("*"),
-                        self._get_bg_color_expr(cursor_row_idx),
+                        self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"),
                     ).map_elements(
                         lambda struct: [
                             Segment(
@@ -559,7 +565,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                         self._cell_highlight.color.name
                                         if (
                                             self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct["index"] == cursor_row_idx
+                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
                                         )
                                         else None
                                     ),
@@ -573,7 +579,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                         self._cell_highlight.color.name
                                         if (
                                             self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct["index"] == cursor_row_idx
+                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
                                         )
                                         else struct[COLOR_COL]
                                     ),
@@ -585,17 +591,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                 style=Style(
                                     color=(
                                         self._cell_highlight.color.name
-                                        if struct["index"] == cursor_row_idx
+                                        if struct[DISPLAY_IDX_COL] == cursor_row_idx
                                         else struct[COLOR_COL]
                                     ),
                                     bgcolor=(
                                         self._cell_highlight.bgcolor.name
-                                        if struct["index"] == cursor_row_idx
-                                        else (
-                                            self._row_col_highlight.bgcolor.name
-                                            if self._cursor_type == CustomTable.CursorType.CELL
-                                            else struct["bgcolor"]
-                                        )
+                                        if struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                        else self._get_sel_col_bg_color(struct)
                                     ),
                                 ),
                             ),
@@ -606,7 +608,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                         self._cell_highlight.color.name
                                         if (
                                             self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct["index"] == cursor_row_idx
+                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
                                         )
                                         else struct[COLOR_COL]
                                     ),

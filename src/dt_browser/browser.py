@@ -1,10 +1,12 @@
 import gc
 import pathlib
 import time
+from typing import ClassVar
 
 import click
 import polars as pl
 from rich.spinner import Spinner
+from rich.style import Style
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -33,6 +35,43 @@ from dt_browser.suggestor import ColumnNameSuggestor
 
 _SHOW_COLUMNS_ID = "showColumns"
 _COLOR_COLUMNS_ID = "colorColumns"
+
+
+class TableWithBookmarks(CustomTable):
+
+    DEFAULT_CSS = (
+        CustomTable.DEFAULT_CSS
+        + """
+TableWithBookmarks > .datatable--row-bookmark {
+    background: $error-lighten-3;
+}
+"""
+    )
+
+    COMPONENT_CLASSES: ClassVar[set[str]] = CustomTable.COMPONENT_CLASSES.union(["datatable--row-bookmark"])
+
+    def __init__(self, *args, bookmarks: Bookmarks, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._bookmarks = bookmarks
+        self._bookmark_highlight: Style | None = None
+
+    def on_mount(self):
+        self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
+
+    def _get_sel_col_bg_color(self, struct: pl.Struct):
+        if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
+            return self._bookmark_highlight.bgcolor.name
+        return super()._get_sel_col_bg_color(struct)
+
+    def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+        tmp = super()._get_row_bg_color_expr(cursor_row_idx)
+        if self._bookmarks.has_bookmarks:
+            tmp = (
+                pl.when(pl.col(INDEX_COL).is_in(self._bookmarks.meta_dt[INDEX_COL]))
+                .then(pl.lit(self._bookmark_highlight.bgcolor.name))
+                .otherwise(tmp)
+            )
+        return tmp
 
 
 class SpinnerWidget(Static):
@@ -342,6 +381,8 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         row_idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
         did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
         self.refresh_bindings()
+        self.query_one("#main_table", CustomTable).refresh(repaint=True)
+
         self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
 
     async def action_toggle_row_detail(self):
@@ -430,6 +471,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def handle_bookmark_removed(self, event: Bookmarks.BookmarkRemoved):
         event.stop()
         self.refresh_bindings()
+        self.query_one("#main_table", CustomTable).refresh(repaint=True)
 
     async def action_show_filter(self):
         # import gc
@@ -526,8 +568,12 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         with Horizontal(id="main_hori"):
-            yield CustomTable(
-                self._backend.data, metadata_dt=self._meta_dt, cursor_type=CustomTable.CursorType.CELL, id="main_table"
+            yield TableWithBookmarks(
+                self._backend.data,
+                metadata_dt=self._meta_dt,
+                bookmarks=self._bookmarks,
+                cursor_type=CustomTable.CursorType.CELL,
+                id="main_table",
             )
         yield TableFooter().data_bind(
             DtBrowser.cur_row,
