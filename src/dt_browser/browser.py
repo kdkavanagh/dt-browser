@@ -1,19 +1,17 @@
 import gc
 import pathlib
 import time
-from typing import ClassVar
 
 import click
 import polars as pl
 from rich.spinner import Spinner
-from rich.style import Style
 from textual import on, work
-from textual._context import message_hook
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
 from textual.containers import Horizontal
 from textual.reactive import reactive
+from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Footer, Label, Static
 from textual_fastdatatable import DataTable
@@ -21,7 +19,6 @@ from textual_fastdatatable import DataTable
 from dt_browser import (
     COLOR_COL,
     COLORS,
-    COLORS_STYLES,
     INDEX_COL,
     ReactiveLabel,
     ReceivesTableSelect,
@@ -38,48 +35,12 @@ _SHOW_COLUMNS_ID = "showColumns"
 _COLOR_COLUMNS_ID = "colorColumns"
 
 
-class ExtendedDataTable(DataTable):
-
-    DEFAULT_CSS = (
-        DataTable.DEFAULT_CSS
-        + COLORS_STYLES
-        + """
-
-ExtendedDataTable > .datatable--row-bookmark {
-    background: $error-lighten-3;
-}
-"""
-    )
-
-    COMPONENT_CLASSES: ClassVar[set[str]] = DataTable.COMPONENT_CLASSES.union(
-        [f"datatable--row{i}" for i in range(len(COLORS.categories))]
-    ).union(["datatable--row-bookmark"])
-
-    def __init__(self, *args, metadata_dt: pl.DataFrame, bookmarks: Bookmarks, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.meta_dt = metadata_dt
-        self._bookmarks = bookmarks
-        self.styles.height = "1fr"
-
-    def _get_row_style(self, row_index: int, base_style: Style) -> Style:
-        style = super()._get_row_style(row_index, base_style)
-        styles = [style]
-        if row_index >= 0 and COLOR_COL in self.meta_dt.columns:
-            color_idx = self.meta_dt[COLOR_COL][row_index]
-            styles.append(self.get_component_styles(f"datatable--row{color_idx}").rich_style)
-
-        if not self._bookmarks._meta_dt.is_empty():
-            idx = self.meta_dt[row_index][INDEX_COL][0]
-            if idx in self._bookmarks._meta_dt[INDEX_COL]:
-                styles.append(self.get_component_styles(f"datatable--row-bookmark").rich_style)
-        return Style.combine(styles)
-
-
 class SpinnerWidget(Static):
     def __init__(self, style: str):
         super().__init__("")
         self._spinner = Spinner(style)
         self.styles.width = 1
+        self.update_render: Timer | None = None
 
     def on_mount(self) -> None:
         self.update_render = self.set_interval(1 / 60, self.update_spinner)
@@ -312,7 +273,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     async def apply_filter(self, event: FilterBox.FilterSubmitted):
         if not event.value:
             self.is_filtered = False
-            idx = self.query_one(CustomTable).cursor_coordinate.row
+            idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
             self._set_filtered_dt(
                 self._original_dt,
                 self._original_meta,
@@ -366,7 +327,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             foot.search_pending = False
 
     def action_iter_search(self, forward: bool):
-        table = self.query_one(CustomTable)
+        table = self.query_one("#main_table", CustomTable)
         coord = table.cursor_coordinate
         self.active_search_idx += 1 if forward else -1
         if self.active_search_idx >= 0 and self.active_search_idx < len(self.active_search_queue):
@@ -378,7 +339,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self.refresh_bindings()
 
     def action_toggle_bookmark(self):
-        row_idx = self.query_one(CustomTable).cursor_coordinate.row
+        row_idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
         did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
         self.refresh_bindings()
         self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
@@ -415,7 +376,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         self._display_dt = active_dt.select(self.visible_columns)
         self.cur_total_rows = len(self._display_dt)
         self.watch_active_search.__wrapped__(self)
-        (table := self.query_one(CustomTable)).set_dt(self._display_dt, self._meta_dt)
+        (table := self.query_one("#main_table", CustomTable)).set_dt(self._display_dt, self._meta_dt)
         if new_row is not None:
             table.move_cursor(row=new_row, column=None)
             self.cur_row = new_row
@@ -432,7 +393,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     @on(SelectFromTable)
     def enable_select_from_table(self, event: SelectFromTable):
         self._select_interest = f"#{event.interested_widget.id}"
-        self.query_one(CustomTable).focus()
+        self.query_one("#main_table", CustomTable).focus()
 
     @on(CustomTable.CellHighlighted)
     async def handle_cell_highlight(self, event: CustomTable.CellHighlighted):
@@ -447,7 +408,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
     @on(Bookmarks.BookmarkSelected)
     def handle_bookmark_select(self, event: Bookmarks.BookmarkSelected):
-        dt = self.query_one(CustomTable)
+        dt = self.query_one("#main_table", CustomTable)
         coord = dt.cursor_coordinate
         sel_idx = event.selected_index
         if self.is_filtered:
@@ -467,7 +428,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
 
     @on(Bookmarks.BookmarkRemoved)
     def handle_bookmark_removed(self, event: Bookmarks.BookmarkRemoved):
-        self.query_one(CustomTable)._clear_caches()
+        event.stop()
         self.refresh_bindings()
 
     async def action_show_filter(self):
@@ -498,12 +459,10 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Check if an action may run."""
         # self.query(".toolbox")
-        if not (edtq := self.query(CustomTable)):
+        if not (edtq := self.query_one("#main_table", CustomTable)):
             return False
 
-        if not edtq.only_one().has_focus and action in (
-            x.action if isinstance(x, Binding) else x[1] for x in DtBrowser.BINDINGS
-        ):
+        if not edtq.has_focus and action in (x.action if isinstance(x, Binding) else x[1] for x in DtBrowser.BINDINGS):
             return False
 
         if action == "iter_search":
@@ -554,7 +513,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
                 self.notify(f"Failed to apply coloring due to: {e}", severity="error", timeout=10)
             foot.pending_action = None
 
-        self.query_one(CustomTable).set_metadata(self._meta_dt)
+        self.query_one("#main_table", CustomTable).set_metadata(self._meta_dt)
 
     def on_mount(self):
         self.cur_total_rows = len(self._display_dt)
@@ -567,10 +526,9 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         with Horizontal(id="main_hori"):
-            yield CustomTable(self._backend.data, metadata_dt=self._meta_dt)
-            # yield ExtendedDataTable(
-            #    backend=self._backend, id="table", metadata_dt=self._meta_dt, bookmarks=self._bookmarks
-            # )
+            yield CustomTable(
+                self._backend.data, metadata_dt=self._meta_dt, cursor_type=CustomTable.CursorType.CELL, id="main_table"
+            )
         yield TableFooter().data_bind(
             DtBrowser.cur_row,
             DtBrowser.cur_total_rows,

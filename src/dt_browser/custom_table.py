@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-import re
+from enum import Enum, auto
 from itertools import accumulate
 from typing import Any, ClassVar, cast
 
@@ -60,8 +60,7 @@ def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> Re
         if col is not None and col.is_id:
             # no separators in ID fields
             return Align(str(obj), align="right")
-        else:
-            return Align(f"{obj:n}", align="right")
+        return Align(f"{obj:n}", align="right")
     if isinstance(obj, (datetime, datetime.time)):
         return Align(obj.isoformat(timespec="milliseconds").replace("+00:00", "Z"), align="right")
     if isinstance(obj, datetime.date):
@@ -83,6 +82,10 @@ HEADER_HEIGHT = 1
 
 
 class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
+
+    class CursorType(Enum):
+        ROW = auto()
+        CELL = auto()
 
     class CellHighlighted(Message):
         """Posted when the cursor moves to highlight a new cell.
@@ -176,10 +179,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
     cursor_coordinate: Reactive[Coordinate] = Reactive(Coordinate(0, 0), repaint=False)
 
-    def __init__(self, dt: pl.DataFrame, metadata_dt: pl.DataFrame, *args, **kwargs):
+    def __init__(
+        self, dt: pl.DataFrame, metadata_dt: pl.DataFrame, *args, cursor_type: CustomTable.CursorType, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self._dt = dt
         self._metadata_dt = metadata_dt
+        self._cursor_type = cursor_type
 
         self._lines = list[Strip]()
         self._widths: dict[str, int] = {}
@@ -356,20 +362,22 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     self.cursor_coordinate.column,
                 )
             case "left":
-                self.cursor_coordinate = Coordinate(
-                    self.cursor_coordinate.row, max(0, self.cursor_coordinate.column - 1)
-                )
-                if self._cum_widths[self._dt.columns[self.cursor_coordinate.column]] < x_offset:
-                    x_offset = self._cum_widths[self._dt.columns[self.cursor_coordinate.column]]
+                if self._cursor_type != CustomTable.CursorType.ROW:
+                    self.cursor_coordinate = Coordinate(
+                        self.cursor_coordinate.row, max(0, self.cursor_coordinate.column - 1)
+                    )
+                    if self._cum_widths[self._dt.columns[self.cursor_coordinate.column]] < x_offset:
+                        x_offset = self._cum_widths[self._dt.columns[self.cursor_coordinate.column]]
             case "right":
-                self.cursor_coordinate = Coordinate(
-                    self.cursor_coordinate.row, min(len(self._dt.columns) - 1, self.cursor_coordinate.column + 1)
-                )
-                col_name = self._dt.columns[self.cursor_coordinate.column]
-                max_offset = self._cum_widths[col_name] + self._widths[col_name]
-                effective_width = self.scrollable_content_region.width - 2
-                if max_offset >= x_offset + effective_width:
-                    x_offset = self._find_minimal_x_offset(self.cursor_coordinate)
+                if self._cursor_type != CustomTable.CursorType.ROW:
+                    self.cursor_coordinate = Coordinate(
+                        self.cursor_coordinate.row, min(len(self._dt.columns) - 1, self.cursor_coordinate.column + 1)
+                    )
+                    col_name = self._dt.columns[self.cursor_coordinate.column]
+                    max_offset = self._cum_widths[col_name] + self._widths[col_name]
+                    effective_width = self.scrollable_content_region.width - 2
+                    if max_offset >= x_offset + effective_width:
+                        x_offset = self._find_minimal_x_offset(self.cursor_coordinate)
 
             case "home":
                 self.cursor_coordinate = Coordinate(0, 0)
@@ -415,7 +423,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         return (base_header, header_width)
 
     @property
-    def render_table_and_header(self):
+    def render_header_and_table(self):
         if self._render_header_and_table is None:
 
             scroll_x, scroll_y = self.scroll_offset
@@ -436,6 +444,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 cols_to_render.append(x)
                 if min_col_idx is None:
                     min_col_idx = i
+            if not cols_to_render:
+                return (Strip([]), pl.DataFrame())
+
             if min_col_idx is None:
                 min_col_idx = 0
             cursor_col_idx = self.cursor_coordinate.column - min_col_idx
@@ -506,7 +517,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     def _get_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
         return (
             pl.when(pl.col("index") == cursor_row_idx)
-            .then(pl.lit(self._row_col_highlight.bgcolor.name))
+            .then(
+                pl.lit(
+                    self._row_col_highlight.bgcolor.name
+                    if self._cursor_type == CustomTable.CursorType.CELL
+                    else self._cell_highlight.bgcolor.name
+                )
+            )
             .otherwise(pl.lit(None))
             .alias("bgcolor")
         )
@@ -517,56 +534,91 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         ):
             # if we get rendered before the resize event is passed to us
             self._render_header_and_table = None
-        cur_header, render_df = self.render_table_and_header
+        cur_header, render_df = self.render_header_and_table
 
         self._lines.clear()
         self._lines.append(cur_header)
+        if not render_df.is_empty():
 
-        _, scroll_y = self.scroll_offset
-        scroll_bar_width = 2
-        cursor_row_idx = self.cursor_coordinate.row - scroll_y
-        self._lines.extend(
-            Strip(x, cell_length=self.scrollable_content_region.width - scroll_bar_width)
-            for x in render_df.lazy()
-            .select(
-                segments=pl.struct(
-                    pl.col("*"),
-                    self._get_bg_color_expr(cursor_row_idx),
-                ).map_elements(
-                    lambda struct: [
-                        Segment(
-                            f" ",
-                            style=Style(bgcolor=struct["bgcolor"]),
-                        ),
-                        Segment(
-                            f"{struct['before_selected']}",
-                            style=Style(color=struct[COLOR_COL], bgcolor=struct["bgcolor"]),
-                        ),
-                        Segment(
-                            struct["selected"],
-                            style=Style(
-                                color=(
-                                    self._cell_highlight.color.name
-                                    if struct["index"] == cursor_row_idx
-                                    else struct[COLOR_COL]
-                                ),
-                                bgcolor=(
-                                    self._cell_highlight.bgcolor.name
-                                    if struct["index"] == cursor_row_idx
-                                    else self._row_col_highlight.bgcolor.name
+            _, scroll_y = self.scroll_offset
+            scroll_bar_width = 2
+            cursor_row_idx = self.cursor_coordinate.row - scroll_y
+            self._lines.extend(
+                Strip(x, cell_length=self.scrollable_content_region.width - scroll_bar_width)
+                for x in render_df.lazy()
+                .select(
+                    segments=pl.struct(
+                        pl.col("*"),
+                        self._get_bg_color_expr(cursor_row_idx),
+                    ).map_elements(
+                        lambda struct: [
+                            Segment(
+                                " ",
+                                style=Style(
+                                    color=(
+                                        self._cell_highlight.color.name
+                                        if (
+                                            self._cursor_type == CustomTable.CursorType.ROW
+                                            and struct["index"] == cursor_row_idx
+                                        )
+                                        else None
+                                    ),
+                                    bgcolor=struct["bgcolor"],
                                 ),
                             ),
-                        ),
-                        Segment(
-                            struct["after_selected"],
-                            style=Style(color=struct[COLOR_COL], bgcolor=struct["bgcolor"]),
-                        ),
-                    ],
-                    return_dtype=pl.Object,
+                            Segment(
+                                struct["before_selected"],
+                                style=Style(
+                                    color=(
+                                        self._cell_highlight.color.name
+                                        if (
+                                            self._cursor_type == CustomTable.CursorType.ROW
+                                            and struct["index"] == cursor_row_idx
+                                        )
+                                        else struct[COLOR_COL]
+                                    ),
+                                    bgcolor=struct["bgcolor"],
+                                ),
+                            ),
+                            Segment(
+                                struct["selected"],
+                                style=Style(
+                                    color=(
+                                        self._cell_highlight.color.name
+                                        if struct["index"] == cursor_row_idx
+                                        else struct[COLOR_COL]
+                                    ),
+                                    bgcolor=(
+                                        self._cell_highlight.bgcolor.name
+                                        if struct["index"] == cursor_row_idx
+                                        else (
+                                            self._row_col_highlight.bgcolor.name
+                                            if self._cursor_type == CustomTable.CursorType.CELL
+                                            else struct["bgcolor"]
+                                        )
+                                    ),
+                                ),
+                            ),
+                            Segment(
+                                struct["after_selected"],
+                                style=Style(
+                                    color=(
+                                        self._cell_highlight.color.name
+                                        if (
+                                            self._cursor_type == CustomTable.CursorType.ROW
+                                            and struct["index"] == cursor_row_idx
+                                        )
+                                        else struct[COLOR_COL]
+                                    ),
+                                    bgcolor=struct["bgcolor"],
+                                ),
+                            ),
+                        ],
+                        return_dtype=pl.Object,
+                    )
                 )
+                .collect()["segments"]
             )
-            .collect()["segments"]
-        )
 
         return super().render_lines(crop)
 
@@ -581,14 +633,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         if dtype.is_decimal() or dtype.is_float() or dtype.is_integer():
             col_max = arr.max()
             col_min = arr.min()
-            return max([measure_width(el, self._console) for el in [col_max, col_min]])
+            return max(measure_width(el, self._console) for el in [col_max, col_min])
         if dtype.is_temporal():
             try:
                 value = arr.drop_nulls()[0]
             except IndexError:
                 return 0
-            else:
-                return measure_width(value, self._console)
+            return measure_width(value, self._console)
         if dtype.is_(pld.Boolean()):
             return 7
 
@@ -601,3 +652,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         width = arr.fill_null("<null>").str.len_chars().max()
         assert isinstance(width, int)
         return width
+
+
+class CustomTableWithBookmarks(CustomTable):
+
+    def __init__(self, *args, bookmarks: pl.DataFrame | None = None, **kwargs):
+        assert bookmarks is not None
+        super().__init__(*args, **kwargs)
+        self._bookmarks = bookmarks

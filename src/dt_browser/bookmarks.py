@@ -4,10 +4,15 @@ import polars as pl
 from textual import on
 from textual.message import Message
 from textual.widget import Widget
-from textual_fastdatatable import DataTable
 
 from dt_browser import INDEX_COL
-from dt_browser.polars_backend import PolarsBackend
+from dt_browser.custom_table import CustomTable
+
+
+def remove_row(dt: pl.DataFrame, rem_row: int):
+    above = dt.slice(0, rem_row)
+    below = dt.slice(rem_row + 1)
+    return pl.concat([above, below])
 
 
 class Bookmarks(Widget):
@@ -40,7 +45,7 @@ class Bookmarks(Widget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._bookmark_df = PolarsBackend(pl.DataFrame())
+        self._bookmark_df = pl.DataFrame()
         self._history: dict[str, list[int]] = {}
         self._meta_dt = pl.DataFrame()
 
@@ -61,7 +66,7 @@ class Bookmarks(Widget):
     #         self.add_bookmark(df[*state["history"][table_name]])
 
     def compose(self):
-        dt = DataTable(backend=self._bookmark_df, cursor_type="row", max_rows=5)
+        dt = CustomTable(self._bookmark_df, metadata_dt=self._meta_dt, cursor_type=CustomTable.CursorType.ROW)
         dt.styles.height = "auto"
         yield dt
 
@@ -69,48 +74,47 @@ class Bookmarks(Widget):
         if not self._meta_dt.is_empty() and meta_df[INDEX_COL][0] in self._meta_dt[INDEX_COL]:
             self.remove_bookmark(meta_df[INDEX_COL][0])
             return False
-        self._bookmark_df.append_rows(df)
+        self._bookmark_df = pl.concat([self._bookmark_df, df])
         self._meta_dt = pl.concat([self._meta_dt, meta_df])
+        dt = self.query_children(CustomTable)
+        if dt:
+            dt.first().set_dt(self._bookmark_df, self._meta_dt)
         return True
 
     @property
     def has_bookmarks(self):
-        return not self._bookmark_df.data.is_empty()
+        return not self._bookmark_df.is_empty()
 
     def action_close(self):
         self.remove()
 
     async def on_mount(self):
-        self.query_one(DataTable).focus()
+        self.query_one(CustomTable).focus()
 
     def action_remove_bookmark(self):
-        dt = self.query_one(DataTable)
-        idx = self._meta_dt[dt.cursor_row][INDEX_COL][0]
+        dt = self.query_one(CustomTable)
+        idx = self._meta_dt[dt.cursor_coordinate.row][INDEX_COL][0]
         self.remove_bookmark(idx)
 
     def remove_bookmark(self, idx: int):
-        dt = self.query(DataTable)
-        if len(self._bookmark_df.data) == 1:
-            self._bookmark_df.drop_row(0)
+        dt = self.query_children(CustomTable)
+        if len(self._bookmark_df) == 1:
+            self._bookmark_df = self._bookmark_df.clear()
             self._meta_dt = self._meta_dt.clear()
             if dt:
                 self.remove()
         else:
+            rem_row = self._meta_dt.with_row_index(name="__tmp").filter(pl.col(INDEX_COL) == idx)["__tmp"][0]
+            self._meta_dt = remove_row(self._meta_dt, rem_row)
+            self._bookmark_df = remove_row(self._bookmark_df, rem_row)
             if dt:
-                rem_row = dt.first().cursor_row
-                dt.first().remove_row(rem_row)
-            else:
-                rem_row = self._meta_dt.with_row_index(name="__tmp").filter(pl.col(INDEX_COL) == idx)["__tmp"][0]
-                self._bookmark_df.drop_row(rem_row)
-
-            above = self._meta_dt.slice(0, rem_row)
-            below = self._meta_dt.slice(rem_row + 1)
-            self._meta_dt = pl.concat([above, below])
+                dt.first().set_dt(self._bookmark_df, self._meta_dt)
 
         self.post_message(Bookmarks.BookmarkRemoved(selected_index=idx))
 
-    @on(DataTable.RowSelected)
-    def handle_select(self, event: DataTable.RowSelected):
-        sel_row = event.cursor_row
+    @on(CustomTable.CellSelected)
+    def handle_select(self, event: CustomTable.CellSelected):
+        event.stop()
+        sel_row = event.coordinate.row
         index = int(self._meta_dt[sel_row][INDEX_COL][0])
         self.post_message(Bookmarks.BookmarkSelected(selected_index=index))
