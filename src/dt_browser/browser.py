@@ -217,7 +217,7 @@ RowDetail {
         yield dt
 
 
-class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
+class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """A Textual app to manage stopwatches."""
 
     BINDINGS = [
@@ -585,10 +585,21 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
         )
 
 
+class DtBrowserApp(App):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
+
+    def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
+        super().__init__()
+        self._table_name = table_name
+        self._source = source_file_or_table
+
+    def compose(self):
+        yield DtBrowser(self._table_name, self._source)
+
+
 @click.command()
 @click.argument("source_file", nargs=1, required=True, type=pathlib.Path)
 def run(source_file: pathlib.Path):
-    app = DtBrowser(source_file, source_file)
+    app = DtBrowserApp(source_file, source_file)
     app.run(mouse=False)
 
 
