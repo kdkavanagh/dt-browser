@@ -7,10 +7,8 @@ from textual.widget import Widget
 from textual.widgets import SelectionList
 from textual.widgets.selection_list import Selection
 
-from dt_browser import HasState
 
-
-class ColumnSelector(Widget, HasState):
+class ColumnSelector(Widget):
 
     DEFAULT_CSS = """
     ColumnSelector {
@@ -115,12 +113,6 @@ class ColumnSelector(Widget, HasState):
 
     def watch_selected_columns(self):
         self._message = ColumnSelector.ColumnSelectionChanged(selected_columns=self.selected_columns, selector=self)
-
-    def save_state(self, *_) -> dict:
-        return {"selected": self.selected_columns}
-
-    def load_state(self, state: dict):
-        self.selected_columns = tuple(x for x in state["selected"] if x in self.available_columns)
 
     def on_mount(self):
         (sel := self.query_one(SelectionList)).focus()

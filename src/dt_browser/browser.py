@@ -254,7 +254,7 @@ class DtBrowser(App):  # pylint: disable=too-many-public-methods,too-many-instan
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else PolarsBackend.from_dataframe(source_file_or_table)
         )
-        self._display_dt = self._filtered_dt = self._original_dt = bt.data.with_row_index(name="row")
+        self._display_dt = self._filtered_dt = self._original_dt = bt.data
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
