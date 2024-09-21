@@ -61,7 +61,7 @@ def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> Re
             # no separators in ID fields
             return Align(str(obj), align="right")
         return Align(f"{obj:n}", align="right")
-    if isinstance(obj, (datetime, datetime.time)):
+    if isinstance(obj, (datetime.datetime, datetime.time)):
         return Align(obj.isoformat(timespec="milliseconds").replace("+00:00", "Z"), align="right")
     if isinstance(obj, datetime.date):
         return Align(obj.isoformat(), align="right")

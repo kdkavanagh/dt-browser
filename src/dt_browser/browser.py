@@ -399,13 +399,10 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         await self.mount(self._bookmarks, before=self.query_one(TableFooter))
 
     async def action_column_selector(self):
-        self._column_selector.data_bind(
-            selected_columns=DtBrowser.visible_columns, available_columns=DtBrowser.all_columns
-        )
         await self.query_one("#main_hori", Horizontal).mount(self._column_selector)
 
     async def action_show_colors(self):
-        self._color_selector.data_bind(selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns)
+
         await self.query_one("#main_hori", Horizontal).mount(self._color_selector)
 
     def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
@@ -567,6 +564,11 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
+        self._color_selector.data_bind(selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns)
+        self._column_selector.data_bind(
+            selected_columns=DtBrowser.visible_columns, available_columns=DtBrowser.all_columns
+        )
+
         with Horizontal(id="main_hori"):
             yield TableWithBookmarks(
                 self._backend.data,
