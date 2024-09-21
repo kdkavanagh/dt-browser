@@ -649,11 +649,3 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         width = arr.cast(pl.Utf8(), strict=False).fill_null("<null>").str.len_chars().max()
         assert isinstance(width, int)
         return width
-
-
-class CustomTableWithBookmarks(CustomTable):
-
-    def __init__(self, *args, bookmarks: pl.DataFrame | None = None, **kwargs):
-        assert bookmarks is not None
-        super().__init__(*args, **kwargs)
-        self._bookmarks = bookmarks

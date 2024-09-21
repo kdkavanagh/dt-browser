@@ -45,26 +45,44 @@ class TableWithBookmarks(CustomTable):
 TableWithBookmarks > .datatable--row-bookmark {
     background: $error-lighten-3;
 }
+
+TableWithBookmarks > .datatable--row-search-result {
+    background: $success-darken-1;
+}
 """
     )
 
-    COMPONENT_CLASSES: ClassVar[set[str]] = CustomTable.COMPONENT_CLASSES.union(["datatable--row-bookmark"])
+    COMPONENT_CLASSES: ClassVar[set[str]] = CustomTable.COMPONENT_CLASSES.union(
+        ["datatable--row-bookmark", "datatable--row-search-result"]
+    )
+
+    active_search_queue: reactive[list[int] | None] = reactive(None)
 
     def __init__(self, *args, bookmarks: Bookmarks, **kwargs):
         super().__init__(*args, **kwargs)
         self._bookmarks = bookmarks
         self._bookmark_highlight: Style | None = None
+        self._search_highlight: Style | None = None
 
     def on_mount(self):
         self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
+        self._search_highlight = self.get_component_rich_style("datatable--row-search-result")
 
     def _get_sel_col_bg_color(self, struct: pl.Struct):
+        if self.active_search_queue and struct[INDEX_COL] in self.active_search_queue:
+            return self._search_highlight.bgcolor.name
         if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
             return self._bookmark_highlight.bgcolor.name
         return super()._get_sel_col_bg_color(struct)
 
     def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
         tmp = super()._get_row_bg_color_expr(cursor_row_idx)
+        if self.active_search_queue:
+            tmp = (
+                pl.when(pl.col(INDEX_COL).is_in(self.active_search_queue))
+                .then(pl.lit(self._search_highlight.bgcolor.name))
+                .otherwise(tmp)
+            )
         if self._bookmarks.has_bookmarks:
             tmp = (
                 pl.when(pl.col(INDEX_COL).is_in(self._bookmarks.meta_dt[INDEX_COL]))
@@ -217,6 +235,21 @@ RowDetail {
         yield dt
 
 
+def from_file_path(path: pathlib.Path, has_header: bool = True) -> pl.DataFrame:
+
+    if path.suffix in [".arrow", ".feather"]:
+        return pl.read_ipc(path)
+    if path.suffix in [".arrows", ".arrowstream"]:
+        return pl.read_ipc_stream(path)
+    if path.suffix == ".json":
+        return pl.read_json(path)
+    if path.suffix == ".csv":
+        return pl.read_csv(path, has_header=has_header)
+    if path.suffix == ".parquet":
+        return pl.read_parquet(path)
+    raise TypeError(f"Dont know how to load file type {path.suffix} for {path}")
+
+
 class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """A Textual app to manage stopwatches."""
 
@@ -250,17 +283,16 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
         bt = (
-            PolarsBackend.from_file_path(source_file_or_table)
+            from_file_path(source_file_or_table)
             if isinstance(source_file_or_table, (str, pathlib.Path))
-            else PolarsBackend.from_dataframe(source_file_or_table)
+            else source_file_or_table
         )
-        self._display_dt = self._filtered_dt = self._original_dt = bt.data
+        self._display_dt = self._filtered_dt = self._original_dt = bt
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
         self._suggestor = ColumnNameSuggestor()
-        self._backend = PolarsBackend.from_dataframe(self._original_dt)
-        self.visible_columns = tuple(self._backend.columns)
+        self.visible_columns = tuple(self._original_dt.columns)
         self.all_columns = self.visible_columns
         self._filter_box = FilterBox(suggestor=self._suggestor, id="filter", classes="toolbox")
         self._select_interest: str | None = None
@@ -276,8 +308,6 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         self._row_detail = RowDetail()
 
-        # self.set_reactive(DtBrowser.color_by, self._backend.columns[0:1])
-
         self._color_by_cache: LRUCache[tuple[str, ...], pl.Series] = LRUCache(5)
         self._last_message_ts = time.time()
 
@@ -288,21 +318,6 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         if time.time() - self._last_message_ts > 3:
             self.app.log("Triggering GC!")
             gc.collect()
-
-    # def save_state(self):
-    #     return {
-    #         "version": 1,
-    #         "name": self._table_name,
-    #         "bookmarks": self._bookmarks.save_state(),
-    #         "filters": self._filter_box.save_state(),
-    #         "cols": self._column_selector.save_state(),
-    #     }
-
-    # def load_state(self, state: dict):
-    #     self._table_name = state["name"]
-    #     self._bookmarks.load_state(state["bookmarks"], self._table_name, self._backend.data)
-    #     self._filter_box.load_state(state["filters"], self._table_name, self._backend.data)
-    #     self._column_selector.load_state(state["cols"], self._table_name, self._backend.data)
 
     def watch_visible_columns(self):
         self._suggestor.columns = self.visible_columns
@@ -571,12 +586,12 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         with Horizontal(id="main_hori"):
             yield TableWithBookmarks(
-                self._backend.data,
+                self._original_dt,
                 metadata_dt=self._meta_dt,
                 bookmarks=self._bookmarks,
                 cursor_type=CustomTable.CursorType.CELL,
                 id="main_table",
-            )
+            ).data_bind(DtBrowser.active_search_queue)
         yield TableFooter().data_bind(
             DtBrowser.cur_row,
             DtBrowser.cur_total_rows,
