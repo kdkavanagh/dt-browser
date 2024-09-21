@@ -355,7 +355,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self.active_search = event.value
 
     @work(exclusive=True)
-    async def watch_active_search(self):
+    async def watch_active_search(self, goto: bool = True):
         if not self.active_search:
             self.active_search_queue = None
             self.active_search_idx = 0
@@ -374,7 +374,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             else:
                 self.active_search_queue = search_queue
                 self.active_search_idx = -1
-                self.action_iter_search(True)
+                if goto:
+                    self.action_iter_search(True)
         except Exception as e:
             self.query_one(FilterBox).query_failed(self.active_search)
             self.notify(f"Failed to run search due to: {e}", severity="error", timeout=10)
@@ -428,7 +429,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
         self._display_dt = active_dt.select(self.visible_columns)
         self.cur_total_rows = len(self._display_dt)
-        self.watch_active_search.__wrapped__(self)
+        self.watch_active_search(goto=False)
         (table := self.query_one("#main_table", CustomTable)).set_dt(self._display_dt, self._meta_dt)
         if new_row is not None:
             table.move_cursor(row=new_row, column=None)
