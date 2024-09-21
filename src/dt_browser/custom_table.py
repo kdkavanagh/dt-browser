@@ -632,7 +632,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 return len("<null>")
             return self._measure(arr.cat.get_categories())
 
-        if dtype.is_decimal() or dtype.is_float() or dtype.is_integer():
+        if dtype.is_integer():
             col_max = arr.max()
             col_min = arr.min()
             return max(measure_width(el, self._console) for el in [col_max, col_min])
@@ -646,12 +646,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return 7
 
         # for everything else, we need to compute it
-
-        arr = arr.cast(
-            pl.Utf8(),
-            strict=False,
-        )
-        width = arr.fill_null("<null>").str.len_chars().max()
+        width = arr.cast(pl.Utf8(), strict=False).fill_null("<null>").str.len_chars().max()
         assert isinstance(width, int)
         return width
 
