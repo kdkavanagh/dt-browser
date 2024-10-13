@@ -79,6 +79,8 @@ def measure_width(obj: object, console: Console) -> int:
 
 
 HEADER_HEIGHT = 1
+COL_PADDING = 1
+PADDING_STR = " " * COL_PADDING
 
 
 class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
@@ -234,7 +236,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._metadata_dt = metadata_dt
         self._widths = {x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns}
         self._cum_widths = {
-            k: v - (self._widths[k] + 1)
+            k: v - (self._widths[k] + COL_PADDING)
             for k, v in zip(self._dt.columns, accumulate(x + 1 for x in self._widths.values()))
         }
         self._render_header_and_table = None
@@ -243,11 +245,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self.scroll_to(0, 0, animate=False)
 
     def render_line(self, y, *_):
+        if y >= len(self._lines):
+            pad = " " * (self.content_region.width)
+            return Strip([Segment(pad)])
         return self._lines[y]
 
     def _find_minimal_x_offset(self, coordinate: Coordinate):
         col_name = self._dt.columns[coordinate.column]
-        effective_width = self.scrollable_content_region.width - 2
+        effective_width = self.scrollable_content_region.width
         padding = 1
         free_space = effective_width - (self._widths[col_name] + padding)
 
@@ -271,7 +276,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         col_name = self._dt.columns[coordinate.column]
         needed_x_offset = self._cum_widths[col_name]
         needed_max_x = needed_x_offset + self._widths[col_name]
-        if x_offset >= needed_x_offset and needed_max_x <= self.window_region.width - 2:
+        if x_offset >= needed_x_offset and needed_max_x <= self.scrollable_content_region.width:
             return False
         return True
 
@@ -301,35 +306,36 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
             self.scroll_to(y=coordinate.row, x=self._find_minimal_x_offset(coordinate), animate=False)
         else:
+            self.app.log(
+                f"Currently visible, no need to scorll.  Coord={self.cursor_coordinate} isNone={self._render_header_and_table is None}"
+            )
             self.refresh(repaint=True)
-
-    # async def _on_idle(self, _: events.Idle) -> None:
-    #     _, header_width = self._build_base_header(self._dt.columns)
-    #     self.virtual_size = Size(header_width, len(self._dt))
 
     def on_resize(self, event: events.Resize):
         # Check maxmimal selection of new size
         if event.size.width == 0:
             return
+        self._ensure_cursor()
+
+    def _ensure_cursor(self):
         self._render_header_and_table = None
         max_idx = len(self._cum_widths) - 1
         for i, (k, x) in enumerate(self._cum_widths.items()):
-            if (x + self._widths[k]) >= (event.size.width - 2):
+            if (x + self._widths[k]) >= self.scrollable_content_region.width:
                 max_idx = i - 1
                 break
 
-        if max_idx < self.cursor_coordinate.column or event.size.height < (
+        if max_idx < self.cursor_coordinate.column or self.scrollable_content_region.height < (
             self.cursor_coordinate.row - self.scroll_offset.y
         ):
             cur_row = self.cursor_coordinate.row
-            max_row = self.scroll_offset[1] + (event.size.height - 1)
+            max_row = self.scroll_offset[1] + (self.scrollable_content_region.height - 1)
             self.app.log(
-                f"Going to cell due to resize.  coord={self.cursor_coordinate}, MaxIdx={max_idx}, height={event.size.height}"
+                f"Going to cell due to resize.  coord={self.cursor_coordinate}, MaxIdx={max_idx}, height={self.scrollable_content_region.height}"
             )
             self.go_to_cell(Coordinate(row=min(cur_row, max_row), column=min(max_idx, self.cursor_coordinate.column)))
         else:
-            self.app.log("Regenerating on resize")
-            self._render_header_and_table = None
+            self.app.log(f"Regenerating on resize. MaxIdx={max_idx}, cursor={self.cursor_coordinate}")
             self.refresh(repaint=True)
 
     def _post_cell_event(self, event_type: type[CustomTable.CellHighlighted | CustomTable.CellSelected]):
@@ -384,7 +390,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     )
                     col_name = self._dt.columns[self.cursor_coordinate.column]
                     max_offset = self._cum_widths[col_name] + self._widths[col_name]
-                    effective_width = self.scrollable_content_region.width - 2
+                    effective_width = self.scrollable_content_region.width
                     if max_offset >= x_offset + effective_width:
                         x_offset = self._find_minimal_x_offset(self.cursor_coordinate)
 
@@ -434,9 +440,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     @property
     def render_header_and_table(self):
         if self._render_header_and_table is None:
-
             scroll_x, scroll_y = self.scroll_offset
-            scroll_bar_width = 2
 
             cols_to_render: list[str] = []
             min_col_idx: int | None = None
@@ -463,7 +467,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             dt_height = self.window_region.height - HEADER_HEIGHT
 
             base_header, header_width = self._build_base_header(cols_to_render)
-            excess = self.window_region.width - header_width - scroll_bar_width
+            excess = self.scrollable_content_region.width - header_width
             header = Strip(base_header + (self._header_pad * (excess)))
 
             rend = self._dt.lazy()
@@ -481,7 +485,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
             sel_col = visible_cols[cursor_col_idx]
             cols_after_selected = visible_cols[cursor_col_idx + 1 :]
-
             theo_max_offset = scroll_x + effective_width
             needed_padding = (
                 theo_max_offset - self._cum_widths[cols_after_selected[0] if cols_after_selected else sel_col]
@@ -493,11 +496,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     if not pad:
                         return concat
                 else:
-                    concat = pl.concat_str([self._formatters[x] for x in cols], separator=" ", ignore_nulls=True)
+                    concat = pl.concat_str(
+                        [self._formatters[x] for x in cols], separator=PADDING_STR, ignore_nulls=True
+                    )
                 if pad:
                     concat = concat.str.pad_end(needed_padding)
 
-                return pl.concat_str(concat, pl.lit(" "))
+                return pl.concat_str(concat, pl.lit(PADDING_STR))
 
             self._render_header_and_table = (
                 header,
@@ -548,6 +553,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self._render_header_and_table
         ):
             # if we get rendered before the resize event is passed to us
+            self._ensure_cursor()
             self._render_header_and_table = None
         cur_header, render_df = self.render_header_and_table
 
@@ -556,10 +562,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         if not render_df.is_empty():
 
             _, scroll_y = self.scroll_offset
-            scroll_bar_width = 2
             cursor_row_idx = self.cursor_coordinate.row - scroll_y
             self._lines.extend(
-                Strip(x, cell_length=self.scrollable_content_region.width - scroll_bar_width)
+                Strip(x, cell_length=self.scrollable_content_region.width)
                 for x in render_df.lazy()
                 .select(
                     segments=pl.struct(
@@ -568,7 +573,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     ).map_elements(
                         lambda struct: [
                             Segment(
-                                " ",
+                                PADDING_STR,
                                 style=Style(
                                     color=(
                                         self._cell_highlight.color.name
