@@ -296,6 +296,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         # If it was off-screen, scroll to it, else refresh just to update the coloring
         if not cur_visible:
+            self.app.log(
+                f"Cell {coordinate} was determined to not be visible in scroll offset={self.scroll_offset}, scrolling..."
+            )
             self.scroll_to(y=coordinate.row, x=self._find_minimal_x_offset(coordinate), animate=False)
         else:
             self.refresh(repaint=True)
@@ -318,8 +321,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         if max_idx < self.cursor_coordinate.column or event.size.height < self.cursor_coordinate.row:
             cur_row = self.cursor_coordinate.row
             max_row = self.scroll_offset[1] + (event.size.height - 1)
+            self.app.log(
+                f"Going to cell due to resize.  coord={self.cursor_coordinate}, MaxIdx={max_idx}, height={event.size.height}"
+            )
             self.go_to_cell(Coordinate(row=min(cur_row, max_row), column=min(max_idx, self.cursor_coordinate.column)))
         else:
+            self.app.log("Regenerating on resize")
             self._render_header_and_table = None
             self.refresh(repaint=True)
 
