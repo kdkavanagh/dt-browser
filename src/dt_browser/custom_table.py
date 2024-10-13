@@ -318,7 +318,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 max_idx = i - 1
                 break
 
-        if max_idx < self.cursor_coordinate.column or event.size.height < self.cursor_coordinate.row:
+        if max_idx < self.cursor_coordinate.column or event.size.height < (
+            self.cursor_coordinate.row - self.scroll_offset.y
+        ):
             cur_row = self.cursor_coordinate.row
             max_row = self.scroll_offset[1] + (event.size.height - 1)
             self.app.log(
