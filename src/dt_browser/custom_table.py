@@ -88,6 +88,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     class CursorType(Enum):
         ROW = auto()
         CELL = auto()
+        NONE = auto()
 
     class CellHighlighted(Message):
         """Posted when the cursor moves to highlight a new cell.
@@ -213,15 +214,19 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._build_header_contents()
 
     def _build_header_contents(self):
-        self._header = {
-            x.strip(): Segment(f" {x}", style=self._header_style)
-            for x in (
-                pl.DataFrame({x: [x] for x in self._dt.columns})
-                .with_columns(self._formatters.values())
-                .slice(0, 1)
-                .transpose()["column_0"]
-            )
-        }
+        self._header: dict[str, Segment] = (
+            {}
+            if not self._dt.columns
+            else {
+                x.strip(): Segment(f"{PADDING_STR}{x}", style=self._header_style)
+                for x in (
+                    pl.DataFrame({x: [x] for x in self._dt.columns})
+                    .with_columns(self._formatters.values())
+                    .slice(0, 1)
+                    .transpose()["column_0"]
+                )
+            }
+        )
 
         _, header_width = self._build_base_header(self._dt.columns)
         self.virtual_size = Size(header_width, len(self._dt) + HEADER_HEIGHT)
@@ -252,15 +257,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
     def _find_minimal_x_offset(self, coordinate: Coordinate):
         col_name = self._dt.columns[coordinate.column]
-        effective_width = self.scrollable_content_region.width
-        padding = 1
-        free_space = effective_width - (self._widths[col_name] + padding)
+        effective_width = self.scrollable_content_region.width - COL_PADDING
+        free_space = effective_width - (self._widths[col_name] + COL_PADDING)
 
         idx = self.cursor_coordinate.column - 1
         x_offset = self._cum_widths[col_name]
         while idx >= 0:
             test_col = self._dt.columns[idx]
-            free_space -= self._widths[test_col] + padding
+            free_space -= self._widths[test_col] + COL_PADDING
             if free_space >= 0:
                 idx -= 1
                 x_offset = self._cum_widths[test_col]
@@ -268,17 +272,21 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 break
         return x_offset
 
+    def _is_col_visible(self, column: int):
+        x_offset = self.scroll_offset.x
+        col_name = self._dt.columns[column]
+        needed_x_offset = self._cum_widths[col_name]
+        needed_max_x = needed_x_offset + self._widths[col_name]
+        if x_offset >= needed_x_offset or needed_max_x >= (x_offset + self.scrollable_content_region.width):
+            return False
+        return True
+
     def _is_coordinate_visible(self, coordinate: Coordinate):
-        x_offset, y_offset = self.scroll_offset
+        y_offset = self.scroll_offset.y
         row_offset = coordinate.row - y_offset
         if row_offset < 0 or row_offset >= (self.window_region.height - 2):
             return False
-        col_name = self._dt.columns[coordinate.column]
-        needed_x_offset = self._cum_widths[col_name]
-        needed_max_x = needed_x_offset + self._widths[col_name]
-        if x_offset >= needed_x_offset and needed_max_x <= self.scrollable_content_region.width:
-            return False
-        return True
+        return self._is_col_visible(coordinate.column)
 
     def move_cursor(self, column: int | None, row: int | None):
         self.go_to_cell(
@@ -317,24 +325,23 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return
         self._ensure_cursor()
 
-    def _ensure_cursor(self):
+    def _ensure_cursor(self, allow_refresh: bool = True):
         self._render_header_and_table = None
-        max_idx = len(self._cum_widths) - 1
-        for i, (k, x) in enumerate(self._cum_widths.items()):
-            if (x + self._widths[k]) >= self.scrollable_content_region.width:
-                max_idx = i - 1
-                break
 
-        if max_idx < self.cursor_coordinate.column or self.scrollable_content_region.height < (
+        max_idx = self.cursor_coordinate.column
+        while not self._is_col_visible(max_idx) and max_idx > 0:
+            max_idx -= 1
+
+        if max_idx != self.cursor_coordinate.column or self.scrollable_content_region.height < (
             self.cursor_coordinate.row - self.scroll_offset.y
         ):
             cur_row = self.cursor_coordinate.row
             max_row = self.scroll_offset[1] + (self.scrollable_content_region.height - 1)
             self.app.log(
-                f"Going to cell due to resize.  coord={self.cursor_coordinate}, MaxIdx={max_idx}, height={self.scrollable_content_region.height}"
+                f"Going to cell due to resize.  coord={self.cursor_coordinate}, NewCol={min(max_idx, self.cursor_coordinate.column)} MaxIdx={max_idx}, height={self.scrollable_content_region.height}"
             )
             self.go_to_cell(Coordinate(row=min(cur_row, max_row), column=min(max_idx, self.cursor_coordinate.column)))
-        else:
+        elif allow_refresh:
             self.app.log(f"Regenerating on resize. MaxIdx={max_idx}, cursor={self.cursor_coordinate}")
             self.refresh(repaint=True)
 
@@ -377,14 +384,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     self.cursor_coordinate.column,
                 )
             case "left":
-                if self._cursor_type != CustomTable.CursorType.ROW:
+                if self._cursor_type == CustomTable.CursorType.CELL:
                     self.cursor_coordinate = Coordinate(
                         self.cursor_coordinate.row, max(0, self.cursor_coordinate.column - 1)
                     )
                     if self._cum_widths[self._dt.columns[self.cursor_coordinate.column]] < x_offset:
                         x_offset = self._cum_widths[self._dt.columns[self.cursor_coordinate.column]]
             case "right":
-                if self._cursor_type != CustomTable.CursorType.ROW:
+                if self._cursor_type == CustomTable.CursorType.CELL:
                     self.cursor_coordinate = Coordinate(
                         self.cursor_coordinate.row, min(len(self._dt.columns) - 1, self.cursor_coordinate.column + 1)
                     )
@@ -462,73 +469,83 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
             if min_col_idx is None:
                 min_col_idx = 0
-            cursor_col_idx = self.cursor_coordinate.column - min_col_idx
 
             dt_height = self.window_region.height - HEADER_HEIGHT
 
             base_header, header_width = self._build_base_header(cols_to_render)
             excess = self.scrollable_content_region.width - header_width
             header = Strip(base_header + (self._header_pad * (excess)))
+            theo_max_offset = self._cum_widths[cols_to_render[0]] + effective_width
 
-            rend = self._dt.lazy()
+            rend = (
+                self._dt.lazy()
+                .select(cols_to_render)
+                .with_columns(self._metadata_dt[INDEX_COL])
+                .slice(scroll_y, dt_height)
+                .with_row_index(DISPLAY_IDX_COL)
+            )
 
             visible_cols = cols_to_render.copy()
+            needed_padding = theo_max_offset - self._cum_widths[visible_cols[-1]]
+            # print(
+            #     f"Needed={needed_padding}, xoffset={scroll_x}  theo={theo_max_offset}, finalWidth={self._cum_widths[visible_cols[-1]]}, regionWidth={self.scrollable_content_region.width}"
+            # )
 
             if COLOR_COL in self._metadata_dt.columns:
                 row_colors = self._metadata_dt.select(pl.col(COLOR_COL).cast(COLORS).alias(COLOR_COL))
                 cols_to_render.insert(0, COLOR_COL)
                 rend = rend.with_columns(row_colors)
 
-            # else:
-            # row_colors = pl.repeat("", len(rend), eager=True)
-
-            cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
-            sel_col = visible_cols[cursor_col_idx]
-            cols_after_selected = visible_cols[cursor_col_idx + 1 :]
-            theo_max_offset = scroll_x + effective_width
-            needed_padding = (
-                theo_max_offset - self._cum_widths[cols_after_selected[0] if cols_after_selected else sel_col]
-            )
-
-            def build_selector(cols: list[str], pad: bool):
+            def build_selector(cols: list[str], needed_padding: int = 0):
                 if not cols:
-                    concat = pl.lit("")
-                    if not pad:
-                        return concat
-                else:
-                    concat = pl.concat_str(
-                        [self._formatters[x] for x in cols], separator=PADDING_STR, ignore_nulls=True
-                    )
-                if pad:
-                    concat = concat.str.pad_end(needed_padding)
+                    return pl.lit("").str.pad_end(needed_padding)
+
+                fmts = [self._formatters[x] for x in cols]
+                if needed_padding:
+                    fmts[-1] = fmts[-1].str.pad_end(needed_padding)
+                concat = pl.concat_str(fmts, separator=PADDING_STR, ignore_nulls=True)
 
                 return pl.concat_str(concat, pl.lit(PADDING_STR))
 
-            self._render_header_and_table = (
-                header,
-                (
-                    rend.select(cols_to_render)
-                    .with_columns(self._metadata_dt[INDEX_COL])
-                    .slice(scroll_y, dt_height)
-                    .with_row_index(DISPLAY_IDX_COL)
-                    .select(
-                        pl.col(DISPLAY_IDX_COL),
-                        pl.col(INDEX_COL),
-                        (
-                            pl.col(COLOR_COL)
-                            if COLOR_COL in cols_to_render
-                            else pl.repeat(None, pl.len(), dtype=pl.Null).alias(COLOR_COL)
-                        ),
-                        before_selected=build_selector(cols_before_selected, False),
-                        selected=build_selector([sel_col], False),
-                        after_selected=build_selector(cols_after_selected, True),
-                    )
-                    .collect()
-                ),
-            )
+            if self._cursor_type in (CustomTable.CursorType.ROW, CustomTable.CursorType.NONE):
+                rend = rend.select(
+                    pl.col(DISPLAY_IDX_COL),
+                    pl.col(INDEX_COL),
+                    (
+                        pl.col(COLOR_COL)
+                        if COLOR_COL in cols_to_render
+                        else pl.repeat(None, pl.len(), dtype=pl.Null).alias(COLOR_COL)
+                    ),
+                    before_selected=build_selector(visible_cols, needed_padding),
+                    selected=pl.lit(""),
+                    after_selected=pl.lit(""),
+                )
+            else:
+
+                cursor_col_idx = self.cursor_coordinate.column - min_col_idx
+
+                cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
+                sel_col = visible_cols[cursor_col_idx]
+                cols_after_selected = visible_cols[cursor_col_idx + 1 :]
+
+                rend = rend.select(
+                    pl.col(DISPLAY_IDX_COL),
+                    pl.col(INDEX_COL),
+                    (
+                        pl.col(COLOR_COL)
+                        if COLOR_COL in cols_to_render
+                        else pl.repeat(None, pl.len(), dtype=pl.Null).alias(COLOR_COL)
+                    ),
+                    before_selected=build_selector(cols_before_selected),
+                    selected=build_selector([sel_col]),
+                    after_selected=build_selector(cols_after_selected, needed_padding),
+                )
+
+            self._render_header_and_table = (header, rend.collect())
         return self._render_header_and_table
 
     def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+
         return (
             pl.when(pl.col(DISPLAY_IDX_COL) == cursor_row_idx)
             .then(
@@ -549,24 +566,29 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         )
 
     def render_lines(self, crop: Region):
-        if self._render_header_and_table and self.scrollable_content_region.height - HEADER_HEIGHT != len(
-            self._render_header_and_table
-        ):
-            # if we get rendered before the resize event is passed to us
-            self._ensure_cursor()
-            self._render_header_and_table = None
+        # if self._render_header_and_table and self.scrollable_content_region.height - HEADER_HEIGHT != len(
+        #     self._render_header_and_table
+        # ):
+        #     # if we get re-rendered before the resize event is passed to us
+        #     print(f"Ensure during render")
+        #     self._ensure_cursor(allow_refresh=False)
+        #     self._render_header_and_table = None
         cur_header, render_df = self.render_header_and_table
 
         self._lines.clear()
         self._lines.append(cur_header)
         if not render_df.is_empty():
-
-            _, scroll_y = self.scroll_offset
-            cursor_row_idx = self.cursor_coordinate.row - scroll_y
-            self._lines.extend(
-                Strip(x, cell_length=self.scrollable_content_region.width)
-                for x in render_df.lazy()
-                .select(
+            if self._cursor_type == CustomTable.CursorType.NONE:
+                rend = render_df.lazy().select(
+                    segments=pl.col("before_selected").map_elements(
+                        lambda x: [Segment(PADDING_STR), Segment(x)],
+                        return_dtype=pl.Object,
+                    )
+                )
+            else:
+                _, scroll_y = self.scroll_offset
+                cursor_row_idx = self.cursor_coordinate.row - scroll_y
+                rend = render_df.lazy().select(
                     segments=pl.struct(
                         pl.col("*"),
                         self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"),
@@ -633,7 +655,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         return_dtype=pl.Object,
                     )
                 )
-                .collect()["segments"]
+
+            self._lines.extend(
+                Strip(x, cell_length=self.scrollable_content_region.width) for x in rend.collect()["segments"]
             )
 
         return super().render_lines(crop)

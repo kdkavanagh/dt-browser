@@ -16,7 +16,6 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Footer, Label, Static
-from textual_fastdatatable import DataTable
 
 from dt_browser import (
     COLOR_COL,
@@ -30,7 +29,6 @@ from dt_browser.bookmarks import Bookmarks
 from dt_browser.column_selector import ColumnSelector
 from dt_browser.custom_table import CustomTable
 from dt_browser.filter_box import FilterBox
-from dt_browser.polars_backend import PolarsBackend
 from dt_browser.suggestor import ColumnNameSuggestor
 
 _SHOW_COLUMNS_ID = "showColumns"
@@ -209,30 +207,36 @@ RowDetail {
     border: tall $accent;
 }
 """
-    row_df = reactive(pl.DataFrame(), recompose=True, always_update=True)
+    row_df = reactive(pl.DataFrame(), always_update=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.border_title = "Row Detail"
+        self._dt = CustomTable(
+            pl.DataFrame(),
+            pl.DataFrame().with_row_index(name=INDEX_COL).select([INDEX_COL]),
+            cursor_type=CustomTable.CursorType.NONE,
+        )
+        self.styles.width = "auto"
 
-    def compose(self):
+    def watch_row_df(self):
         if self.row_df.is_empty():
             return
-        dt = DataTable(
-            backend=PolarsBackend.from_dataframe(
-                self.row_df.with_columns(
-                    [
-                        pl.col(col).cast(pl.Utf8) if dtype == pl.Categorical else pl.col(col)
-                        for col, dtype in zip(self.row_df.columns, self.row_df.dtypes)
-                    ]
-                ).transpose(include_header=True, header_name="Field", column_names=["Value"])
-            ),
-            show_cursor=False,
-            show_header=False,
-            show_row_labels=False,
+
+        display_df = self.row_df.with_columns(
+            [
+                pl.col(col).cast(pl.Utf8) if dtype == pl.Categorical else pl.col(col)
+                for col, dtype in zip(self.row_df.columns, self.row_df.dtypes)
+            ]
+        ).transpose(include_header=True, header_name="Field", column_names=["Value"])
+        self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
+        self._dt.styles.width = (
+            display_df["Field"].str.len_chars().max() + display_df["Value"].str.len_chars().max() + 3
         )
-        dt.styles.width = "auto"
-        yield dt
+        self._dt.refresh()
+
+    def compose(self):
+        yield self._dt
 
 
 def from_file_path(path: pathlib.Path, has_header: bool = True) -> pl.DataFrame:
