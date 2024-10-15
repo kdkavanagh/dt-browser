@@ -1,6 +1,6 @@
 [project]
 name = "dt-browser"
-version = "0.0.1"
+dynamic = ["version"]
 description = "A TUI for browsing, searching, and filtering dataframes using Polars/Apache Arrow"
 keywords = ["pyarrow", "dataframe", "tui", "polars", "datatable", "textual"]
 authors = [{ name = "Kyle Kavanagh" }]
@@ -29,6 +29,12 @@ dev = [
 
 [project.scripts]
 dtbrowser = "dt_browser.browser:run"
+
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
 
 [tool.black]
 line-length = 120
