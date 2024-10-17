@@ -45,7 +45,7 @@ TableWithBookmarks > .datatable--row-bookmark {
 }
 
 TableWithBookmarks > .datatable--row-search-result {
-    background: $success-darken-1;
+    background: $surface-lighten-3;
 }
 """
     )

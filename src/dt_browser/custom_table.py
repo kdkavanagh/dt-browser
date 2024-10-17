@@ -492,7 +492,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             # )
 
             if COLOR_COL in self._metadata_dt.columns:
-                row_colors = self._metadata_dt.select(pl.col(COLOR_COL).cast(COLORS).alias(COLOR_COL))
+                row_colors = self._metadata_dt.slice(scroll_y, dt_height).select(
+                    pl.col(COLOR_COL).cast(COLORS).alias(COLOR_COL)
+                )
                 cols_to_render.insert(0, COLOR_COL)
                 rend = rend.with_columns(row_colors)
 
