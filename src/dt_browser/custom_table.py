@@ -580,8 +580,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._lines.clear()
         self._lines.append(cur_header)
         if not render_df.is_empty():
+            rend = render_df.lazy()
             if self._cursor_type == CustomTable.CursorType.NONE:
-                rend = render_df.lazy().select(
+                rend = rend.select(
                     segments=pl.col("before_selected").map_elements(
                         lambda x: [Segment(PADDING_STR), Segment(x)],
                         return_dtype=pl.Object,
@@ -590,7 +591,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             else:
                 _, scroll_y = self.scroll_offset
                 cursor_row_idx = self.cursor_coordinate.row - scroll_y
-                rend = render_df.lazy().select(
+                rend = rend.select(
                     segments=pl.struct(
                         pl.col("*"),
                         self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"),
@@ -678,7 +679,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return max(measure_width(el, self._console) for el in [col_max, col_min])
         if dtype.is_temporal():
             try:
-                value = arr.drop_nulls()[0]
+                value = arr.drop_nulls().slice(0, 1).cast(pl.Utf8)[0]
             except IndexError:
                 return 0
             return measure_width(value, self._console)

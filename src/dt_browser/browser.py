@@ -1,3 +1,4 @@
+import datetime
 import gc
 import pathlib
 import time
@@ -5,6 +6,7 @@ from typing import ClassVar
 
 import click
 import polars as pl
+import tzlocal
 from rich.spinner import Spinner
 from rich.style import Style
 from textual import on, work
@@ -33,6 +35,9 @@ from dt_browser.suggestor import ColumnNameSuggestor
 
 _SHOW_COLUMNS_ID = "showColumns"
 _COLOR_COLUMNS_ID = "colorColumns"
+_TS_COLUMNS_ID = "tsColumns"
+
+_TIMEZONE = str(tzlocal.get_localzone())
 
 
 class TableWithBookmarks(CustomTable):
@@ -88,6 +93,24 @@ TableWithBookmarks > .datatable--row-search-result {
                 .otherwise(tmp)
             )
         return tmp
+
+
+_ALREADY_DT = "dt"
+
+
+def _guess_timestamp_cols(df: pl.DataFrame):
+    date_range = pl.Series(values=[datetime.date(2001, 1, 1), datetime.date(2042, 1, 1)])
+    converts = [(x,) + tuple(date_range.dt.epoch(x)) for x in ("s", "ms", "us", "ns")]
+
+    for col, dtype in df.schema.items():
+        if dtype.is_integer():
+            for suffix, min_val, max_val in converts:
+                all_in_range = df.filter((pl.col(col) < min_val) | (pl.col(col) > max_val)).is_empty()
+                if all_in_range:
+                    yield (col, suffix)
+                    break
+        elif dtype.is_temporal():
+            yield (col, _ALREADY_DT)
 
 
 class SpinnerWidget(Static):
@@ -265,6 +288,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         ("b", "toggle_bookmark", "Add/Del Bookmark"),
         Binding("B", "show_bookmarks", "Bookmarks", key_display="shift+B"),
         ("c", "column_selector", "Columns..."),
+        ("t", "timestamp_selector", "Timestamps..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
     ]
@@ -272,6 +296,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
     visible_columns: reactive[tuple[str, ...]] = reactive(tuple())
     all_columns: reactive[tuple[str, ...]] = reactive(tuple())
+    timestamp_columns: reactive[tuple[str, ...]] = reactive(tuple())
+    available_timestamp_columns: reactive[tuple[str, ...]] = reactive(tuple())
     is_filtered = reactive(False)
     cur_row = reactive(0)
     cur_total_rows = reactive(0)
@@ -305,10 +331,15 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             allow_reorder=False, id=_COLOR_COLUMNS_ID, title="Select columns to color by"
         )
 
+        self._ts_cols = dict(_guess_timestamp_cols(self._original_dt))
+        self._ts_col_selector = ColumnSelector(id=_TS_COLUMNS_ID, title="Select epoch timestamp columns")
+        self.available_timestamp_columns = tuple(self._ts_cols.keys())
+
         # Necessary to prevent the main table from resizing to 0 when the col selectors are mounted and then immediately resizing
         # (apparently that happens when col selector width = auto)
         self._color_selector.styles.width = 1
         self._column_selector.styles.width = 1
+        self._ts_col_selector.styles.width = 1
 
         self._row_detail = RowDetail()
 
@@ -425,13 +456,32 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         await self.query_one("#main_hori", Horizontal).mount(self._color_selector)
 
+    async def action_timestamp_selector(self):
+        await self.query_one("#main_hori", Horizontal).mount(self._ts_col_selector)
+
     def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
         self._filtered_dt = filtered_dt
         self._meta_dt = filtered_meta
         self._set_active_dt(self._filtered_dt, **kwargs)
 
     def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
-        self._display_dt = active_dt.select(self.visible_columns)
+        active_dt = active_dt.select(self.visible_columns)
+        if self.timestamp_columns:
+            ordered_cols: list[pl.Expr] = []
+            for col in self.visible_columns:
+                ordered_cols.append(pl.col(col))
+                if col in self.timestamp_columns:
+                    expr = (
+                        pl.col(col).dt.epoch("ns").alias(f"{col} (ns)")
+                        if self._ts_cols[col] == _ALREADY_DT
+                        else pl.from_epoch(pl.col(col), time_unit=self._ts_cols[col])
+                        .dt.convert_time_zone(_TIMEZONE)
+                        .alias(f"{col} (Local)")
+                    )
+                    ordered_cols.append(expr)
+            active_dt = active_dt.select(ordered_cols)
+
+        self._display_dt = active_dt
         self.cur_total_rows = len(self._display_dt)
         self.watch_active_search(goto=False)
         (table := self.query_one("#main_table", CustomTable)).set_dt(self._display_dt, self._meta_dt)
@@ -447,6 +497,11 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_COLOR_COLUMNS_ID}")
     async def set_color_by(self, event: ColumnSelector.ColumnSelectionChanged):
         self.color_by = tuple(event.selected_columns)
+
+    @on(ColumnSelector.ColumnSelectionChanged, f"#{_TS_COLUMNS_ID}")
+    async def set_timestamp_cols(self, event: ColumnSelector.ColumnSelectionChanged):
+        self.timestamp_columns = tuple(event.selected_columns)
+        self._set_active_dt(self._filtered_dt)
 
     @on(SelectFromTable)
     def enable_select_from_table(self, event: SelectFromTable):
@@ -534,6 +589,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         if action == "show_bookmarks":
             return self._bookmarks.has_bookmarks
 
+        if action == "timestamp_selector":
+            return len(self._ts_cols) > 0
+
         return True
 
     @work(exclusive=True)
@@ -584,6 +642,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
+        self._ts_col_selector.data_bind(
+            selected_columns=DtBrowser.timestamp_columns, available_columns=DtBrowser.available_timestamp_columns
+        )
         self._color_selector.data_bind(selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns)
         self._column_selector.data_bind(
             selected_columns=DtBrowser.visible_columns, available_columns=DtBrowser.all_columns
