@@ -105,7 +105,16 @@ def _guess_timestamp_cols(df: pl.DataFrame):
     for col, dtype in df.schema.items():
         if dtype.is_integer():
             for suffix, min_val, max_val in converts:
-                all_in_range = df.filter((pl.col(col) < min_val) | (pl.col(col) > max_val)).is_empty()
+                all_in_range = (
+                    df.lazy()
+                    .select(is_zero=pl.col(col) == 0, is_inside=((pl.col(col) >= min_val) & (pl.col(col) <= max_val)))
+                    .select(
+                        count=pl.col("is_inside").any()
+                        & (pl.any_horizontal(pl.col("is_zero"), pl.col("is_inside")).sum() == pl.len())
+                    )
+                    .collect()
+                    .get_column("count")[0]
+                )
                 if all_in_range:
                     yield (col, suffix)
                     break
