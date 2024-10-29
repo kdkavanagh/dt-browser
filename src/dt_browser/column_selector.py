@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from textual import events, on
+from textual.binding import Binding
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -27,9 +28,11 @@ class ColumnSelector(Widget):
 
     BINDINGS = [
         ("escape", "close()", "Close and Apply"),
-        ("a", "apply()", "Apply"),
+        Binding("ctrl+a", "apply()", "Apply", key_display="ctrl+a"),
         ("shift+up", "move(True)", "Move up"),
         ("shift+down", "move(False)", "Move Down"),
+        Binding("ctrl+s", "select_all()", "Select All", key_display="ctrl+s"),
+        Binding("ctrl+x", "deselect_all()", "Deselect All", key_display="ctrl+x"),
     ]
 
     @dataclass
@@ -62,6 +65,12 @@ class ColumnSelector(Widget):
             self.post_message(self._message)
             self._message = None
 
+    def action_deselect_all(self):
+        self.query_one(SelectionList).deselect_all()
+
+    def action_select_all(self):
+        self.query_one(SelectionList).select_all()
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action == "move":
             filter_value = self.query_one(Input).value
@@ -85,9 +94,6 @@ class ColumnSelector(Widget):
         if event.key == "backspace":
             box.action_delete_left()
             return
-        if event.key == "down":
-            if self.query_one(Input).has_focus:
-                self.query_one(SelectionList).focus()
 
     @on(SelectionList.SelectionHighlighted)
     def _refresh_actions(self):

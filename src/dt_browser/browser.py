@@ -296,7 +296,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         Binding("N", "iter_search(False)", "Prev", key_display="shift+N"),
         ("b", "toggle_bookmark", "Add/Del Bookmark"),
         Binding("B", "show_bookmarks", "Bookmarks", key_display="shift+B"),
-        ("c", "column_selector", "Columns..."),
+        Binding("c", "column_selector", "Columns..."),
         ("t", "timestamp_selector", "Timestamps..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
