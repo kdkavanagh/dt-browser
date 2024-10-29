@@ -210,7 +210,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._cell_highlight = self.get_component_rich_style("datatable--cursor")
         self._header_style = self.get_component_rich_style("datatable--header")
         self._row_col_highlight = self.get_component_rich_style("datatable--even-row")
-        self._header_pad = [Segment(" ", style=self._header_style)]
+        self._header_pad = [Segment(PADDING_STR, style=self._header_style)]
         self._build_header_contents()
 
     def _build_header_contents(self):
@@ -242,7 +242,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._widths = {x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns}
         self._cum_widths = {
             k: v - (self._widths[k] + COL_PADDING)
-            for k, v in zip(self._dt.columns, accumulate(x + 1 for x in self._widths.values()))
+            for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()))
         }
         self._render_header_and_table = None
         self._formatters = {x: self._build_cast_expr(x) for x in self._dt.columns}
@@ -486,10 +486,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
 
             visible_cols = cols_to_render.copy()
-            needed_padding = theo_max_offset - self._cum_widths[visible_cols[-1]]
-            # print(
-            #     f"Needed={needed_padding}, xoffset={scroll_x}  theo={theo_max_offset}, finalWidth={self._cum_widths[visible_cols[-1]]}, regionWidth={self.scrollable_content_region.width}"
-            # )
+            first_col_prefix_padding = COL_PADDING
+            needed_padding = theo_max_offset - self._cum_widths[visible_cols[-1]] - first_col_prefix_padding
 
             if COLOR_COL in self._metadata_dt.columns:
                 row_colors = self._metadata_dt.slice(scroll_y, dt_height).select(
@@ -504,7 +502,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
                 fmts = [self._formatters[x] for x in cols]
                 if needed_padding:
-                    fmts[-1] = fmts[-1].str.pad_end(needed_padding)
+                    fmts[-1] = fmts[-1].str.pad_end(needed_padding - COL_PADDING, fill_char=PADDING_STR[0])
                 concat = pl.concat_str(fmts, separator=PADDING_STR, ignore_nulls=True)
 
                 return pl.concat_str(concat, pl.lit(PADDING_STR))
