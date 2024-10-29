@@ -381,16 +381,17 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             (foot := self.query_one(TableFooter)).filter_pending = True
             ctx = pl.SQLContext(frames={"dt": pl.concat([self._original_dt, self._original_meta], how="horizontal")})
             try:
-                dt = await ctx.execute(f"select * from dt where {event.value}").collect_async()
+                query = self.current_filter.replace(" && ", " and ").replace(" || ", " or ")
+                dt = await ctx.execute(f"select * from dt where {query}").collect_async()
                 meta = dt.select([x for x in dt.columns if x.startswith("__")])
                 dt = dt.select([x for x in dt.columns if not x.startswith("__")])
                 self.is_filtered = True
                 if dt.is_empty():
-                    self.notify(f"No results found for filter: {event.value}", severity="warn", timeout=5)
+                    self.notify(f"No results found for filter: {query}", severity="warn", timeout=5)
                 else:
                     self._set_filtered_dt(dt, meta, new_row=0)
             except Exception as e:
-                self.query_one(FilterBox).query_failed(event.value)
+                self.query_one(FilterBox).query_failed(query)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
             foot.filter_pending = False
 
@@ -408,8 +409,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         (foot := self.query_one(TableFooter)).search_pending = True
         try:
             ctx = pl.SQLContext(frames={"dt": (pl.concat([self._display_dt, self._meta_dt], how="horizontal"))})
+            query = self.active_search.replace(" && ", " and ").replace(" || ", " or ")
             search_queue = list(
-                (await ctx.execute(f"select {INDEX_COL} from dt where {self.active_search}").collect_async())[INDEX_COL]
+                (await ctx.execute(f"select {INDEX_COL} from dt where {query}").collect_async())[INDEX_COL]
             )
 
             foot.search_pending = False
@@ -421,7 +423,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                 if goto:
                     self.action_iter_search(True)
         except Exception as e:
-            self.query_one(FilterBox).query_failed(self.active_search)
+            self.query_one(FilterBox).query_failed(query)
             self.notify(f"Failed to run search due to: {e}", severity="error", timeout=10)
             foot.search_pending = False
 
