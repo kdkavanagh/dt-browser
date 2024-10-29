@@ -50,6 +50,7 @@ class ColumnSelector(Widget):
         super().__init__(*args, **kwargs)
         self._allow_reorder = allow_reorder
         self._title = title
+        self.filter_value: str | None = None
         self._message: ColumnSelector.ColumnSelectionChanged | None = None
 
     def action_close(self):
@@ -93,14 +94,15 @@ class ColumnSelector(Widget):
         self.refresh_bindings()
 
     @on(Input.Changed)
-    def _update_filter(self):
+    def _update_filter(self, event: Input.Changed):
+        self.filter_value = event.value
+        event.prevent_default()
         self._refresh_options()
 
     def compute_filtered_ordered_columns(self):
-        filter_value = self.query_one(Input).value
-        if not filter_value:
+        if not self.filter_value:
             return self.ordered_columns
-        return tuple(x for x in self.ordered_columns if filter_value.lower() in x.lower())
+        return tuple(x for x in self.ordered_columns if self.filter_value.lower() in x.lower())
 
     def _refresh_options(self):
         sel_list = self.query_one(SelectionList)
