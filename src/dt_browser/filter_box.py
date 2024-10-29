@@ -100,6 +100,9 @@ FilterBox {
             msg = FilterBox.FilterSubmitted(value=new_value)
         self.post_message(msg)
 
+    def get_value(self):
+        return self._active_filter[self.is_goto]
+
     @on(ListView.Selected)
     def input_historical(self, event: ListView.Selected):
         box = self.query_one(Input)

@@ -307,7 +307,10 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     all_columns: reactive[tuple[str, ...]] = reactive(tuple())
     timestamp_columns: reactive[tuple[str, ...]] = reactive(tuple())
     available_timestamp_columns: reactive[tuple[str, ...]] = reactive(tuple())
+
     is_filtered = reactive(False)
+    current_filter = reactive[str | None](None)
+
     cur_row = reactive(0)
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
@@ -326,6 +329,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else source_file_or_table
         )
+        # bt = bt.with_columns(TestTs=datetime.datetime.now())
         self._display_dt = self._filtered_dt = self._original_dt = bt
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
@@ -342,6 +346,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         self._ts_cols = dict(_guess_timestamp_cols(self._original_dt))
         self._ts_col_selector = ColumnSelector(id=_TS_COLUMNS_ID, title="Select epoch timestamp columns")
+        self._ts_col_names: dict[str, str] = {}
         self.available_timestamp_columns = tuple(self._ts_cols.keys())
 
         # Necessary to prevent the main table from resizing to 0 when the col selectors are mounted and then immediately resizing
@@ -367,9 +372,13 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self._suggestor.columns = self.visible_columns
 
     @on(FilterBox.FilterSubmitted)
+    async def update_filter(self, event: FilterBox.FilterSubmitted):
+        self.current_filter = event.value
+        self.apply_filter()
+
     @work(exclusive=True)
-    async def apply_filter(self, event: FilterBox.FilterSubmitted):
-        if not event.value:
+    async def apply_filter(self):
+        if not self.current_filter:
             self.is_filtered = False
             idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
             self._set_filtered_dt(
@@ -393,6 +402,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             except Exception as e:
                 self.query_one(FilterBox).query_failed(query)
                 self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
+                self.current_filter = None
             foot.filter_pending = False
 
     @on(FilterBox.GoToSubmitted)
@@ -476,21 +486,12 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self._set_active_dt(self._filtered_dt, **kwargs)
 
     def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
-        active_dt = active_dt.select(self.visible_columns)
-        if self.timestamp_columns:
-            ordered_cols: list[pl.Expr] = []
-            for col in self.visible_columns:
-                ordered_cols.append(pl.col(col))
-                if col in self.timestamp_columns:
-                    expr = (
-                        pl.col(col).dt.epoch("ns").alias(f"{col} (ns)")
-                        if self._ts_cols[col] == _ALREADY_DT
-                        else pl.from_epoch(pl.col(col), time_unit=self._ts_cols[col])
-                        .dt.convert_time_zone(_TIMEZONE)
-                        .alias(f"{col} (Local)")
-                    )
-                    ordered_cols.append(expr)
-            active_dt = active_dt.select(ordered_cols)
+        ordered_cols: list[pl.Expr] = []
+        for col in self.visible_columns:
+            ordered_cols.append(pl.col(col))
+            if col in self._ts_col_names:
+                ordered_cols.append(pl.col(self._ts_col_names[col]))
+        active_dt = active_dt.select(ordered_cols)
 
         self._display_dt = active_dt
         self.cur_total_rows = len(self._display_dt)
@@ -512,7 +513,33 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     @on(ColumnSelector.ColumnSelectionChanged, f"#{_TS_COLUMNS_ID}")
     async def set_timestamp_cols(self, event: ColumnSelector.ColumnSelectionChanged):
         self.timestamp_columns = tuple(event.selected_columns)
-        self._set_active_dt(self._filtered_dt)
+
+    @work(exclusive=True)
+    async def watch_timestamp_columns(self):
+        old_cols = [v for k, v in self._ts_col_names.items() if k not in self.timestamp_columns]
+        self._original_dt = self._original_dt.drop(old_cols)
+        self._ts_col_names = {
+            x: f"{x} (ns)" if self._ts_cols[x] == _ALREADY_DT else f"{x} (Local)" for x in self.timestamp_columns
+        }
+        if self._ts_col_names:
+            (foot := self.query_one(TableFooter)).pending_action = "Computing Ts columns"
+            try:
+                calc_expr = [
+                    (
+                        pl.col(x).dt.epoch("ns")
+                        if self._ts_cols[x] == _ALREADY_DT
+                        else pl.from_epoch(pl.col(x), time_unit=self._ts_cols[x]).dt.convert_time_zone(_TIMEZONE)
+                    ).alias(self._ts_col_names[x])
+                    for x in self.timestamp_columns
+                ]
+                print(calc_expr)
+                self._original_dt = self._original_dt.with_columns(calc_expr)
+                print(self._original_dt.columns)
+            except Exception as e:
+                self.notify(f"Failed to compute timestamp columns: {e}", severity="warn", timeout=5)
+            finally:
+                foot.pending_action = None
+        self.apply_filter()
 
     @on(SelectFromTable)
     def enable_select_from_table(self, event: SelectFromTable):
