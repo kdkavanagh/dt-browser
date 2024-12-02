@@ -255,12 +255,9 @@ RowDetail {
         if self.row_df.is_empty():
             return
 
-        display_df = self.row_df.with_columns(
-            [
-                pl.col(col).cast(pl.Utf8) if dtype == pl.Categorical else pl.col(col)
-                for col, dtype in zip(self.row_df.columns, self.row_df.dtypes)
-            ]
-        ).transpose(include_header=True, header_name="Field", column_names=["Value"])
+        display_df = self.row_df.cast(pl.Utf8).transpose(
+            include_header=True, header_name="Field", column_names=["Value"]
+        )
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self._dt.styles.width = (
             display_df["Field"].str.len_chars().max() + display_df["Value"].str.len_chars().max() + 3
