@@ -229,7 +229,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         )
 
         _, header_width = self._build_base_header(self._dt.columns)
-        self.virtual_size = Size(header_width, len(self._dt) + HEADER_HEIGHT)
+        # Max to handle empty dataframe message
+        self.virtual_size = Size(header_width, max(1, len(self._dt)) + HEADER_HEIGHT)
 
     def set_metadata(self, metadata_dt: pl.DataFrame):
         self._metadata_dt = metadata_dt
@@ -237,6 +238,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self.refresh(repaint=True)
 
     def set_dt(self, dt: pl.DataFrame, metadata_dt: pl.DataFrame):
+        if not dt.columns:
+            raise Exception("Cannot display a datatable with no columns")
         self._dt = dt
         self._metadata_dt = metadata_dt
         self._widths = {x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns}
@@ -577,7 +580,17 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         self._lines.clear()
         self._lines.append(cur_header)
-        if not render_df.is_empty():
+        if render_df.is_empty():
+            msg = "< Empty Dataframe >"
+            padding = int((self.scrollable_content_region.width - len(msg)) / 2)
+            msg = f"{' '*padding}{msg}{' '*padding}"
+            self._lines.append(
+                Strip(
+                    [Segment(msg)],
+                    cell_length=self.scrollable_content_region.width,
+                )
+            )
+        else:
             rend = render_df.lazy()
             if self._cursor_type == CustomTable.CursorType.NONE:
                 rend = rend.select(
@@ -684,6 +697,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         if dtype.is_(pld.Boolean()):
             return 7
 
+        if arr.is_empty():
+            return 0
         # for everything else, we need to compute it
         width = arr.cast(pl.Utf8(), strict=False).fill_null("<null>").str.len_chars().max()
         assert isinstance(width, int)

@@ -245,7 +245,7 @@ RowDetail {
         super().__init__(*args, **kwargs)
         self.border_title = "Row Detail"
         self._dt = CustomTable(
-            pl.DataFrame(),
+            pl.DataFrame({"Temp": []}),
             pl.DataFrame().with_row_index(name=INDEX_COL).select([INDEX_COL]),
             cursor_type=CustomTable.CursorType.NONE,
         )
@@ -461,7 +461,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         if not self.show_row_detail:
             if existing := self.query(RowDetail):
                 existing.remove()
-        else:
+        elif not self._display_dt.is_empty():
             await self.query_one("#main_hori", Horizontal).mount(self._row_detail)
 
     async def action_show_bookmarks(self):
@@ -492,6 +492,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         self._display_dt = active_dt
         self.cur_total_rows = len(self._display_dt)
+        if self._display_dt.is_empty():
+            self.show_row_detail = False
         self.watch_active_search(goto=False)
         (table := self.query_one("#main_table", CustomTable)).set_dt(self._display_dt, self._meta_dt)
         if new_row is not None:
@@ -529,9 +531,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                     ).alias(self._ts_col_names[x])
                     for x in self.timestamp_columns
                 ]
-                print(calc_expr)
                 self._original_dt = self._original_dt.with_columns(calc_expr)
-                print(self._original_dt.columns)
             except Exception as e:
                 self.notify(f"Failed to compute timestamp columns: {e}", severity="warn", timeout=5)
             finally:
@@ -614,18 +614,20 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         if not edtq.has_focus and action in (x.action if isinstance(x, Binding) else x[1] for x in DtBrowser.BINDINGS):
             return False
 
-        if action == "iter_search":
-            if not self.active_search_queue:
-                return False
-            if bool(parameters[0]) and self.active_search_idx == len(self.active_search_queue) - 1:
-                return False
-            if not bool(parameters[0]) and self.active_search_idx == 0:
-                return False
-        if action == "show_bookmarks":
-            return self._bookmarks.has_bookmarks
-
-        if action == "timestamp_selector":
-            return len(self._ts_cols) > 0
+        match action:
+            case "iter_search":
+                if not self.active_search_queue:
+                    return False
+                if bool(parameters[0]) and self.active_search_idx == len(self.active_search_queue) - 1:
+                    return False
+                if not bool(parameters[0]) and self.active_search_idx == 0:
+                    return False
+            case "show_bookmarks":
+                return self._bookmarks.has_bookmarks
+            case "timestamp_selector":
+                return len(self._ts_cols) > 0
+            case "toggle_row_detail":
+                return not self._display_dt.is_empty()
 
         return True
 
