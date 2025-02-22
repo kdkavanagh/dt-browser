@@ -683,6 +683,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             if arr.cat.get_categories().is_empty():
                 return len("<null>")
             return self._measure(arr.cat.get_categories())
+        if arr.is_empty():
+            return 0
 
         if dtype.is_integer():
             col_max = arr.max()
