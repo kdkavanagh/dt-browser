@@ -16,7 +16,7 @@ class ColumnSelector(Widget):
     DEFAULT_CSS = """
     ColumnSelector {
         dock: right;
-        border: tall $accent;
+        border: tall $primary;
         height: auto;
     }
 

@@ -139,7 +139,7 @@ class SpinnerWidget(Static):
 class TableFooter(Footer):
     DEFAULT_CSS = """
     TableFooter > .tablefooter--rowcount {
-        background: $accent-darken-1;
+        background: $primary-darken-1;
         width: auto;
         padding: 0 2;
     }
@@ -235,8 +235,10 @@ class RowDetail(Widget, can_focus=False, can_focus_children=False):
     DEFAULT_CSS = """
 RowDetail {
     width: auto;
+    max_width: 50%;
+    min_width: 30%;
     padding: 0 1;
-    border: tall $accent;
+    border: tall $primary;
 }
 """
     row_df = reactive(pl.DataFrame(), always_update=True)
@@ -249,7 +251,6 @@ RowDetail {
             pl.DataFrame().with_row_index(name=INDEX_COL).select([INDEX_COL]),
             cursor_type=CustomTable.CursorType.NONE,
         )
-        self.styles.width = "auto"
 
     def watch_row_df(self):
         if self.row_df.is_empty():
@@ -259,9 +260,7 @@ RowDetail {
             include_header=True, header_name="Field", column_names=["Value"]
         )
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
-        self._dt.styles.width = (
-            display_df["Field"].str.len_chars().max() + display_df["Value"].str.len_chars().max() + 3
-        )
+        self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
 
     def compose(self):

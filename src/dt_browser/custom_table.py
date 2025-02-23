@@ -248,7 +248,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()))
         }
         self._render_header_and_table = None
-        self._formatters = {x: self._build_cast_expr(x) for x in self._dt.columns}
+        self._formatters = {x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns}
         self._build_header_contents()
         self.scroll_to(0, 0, animate=False)
 
@@ -346,7 +346,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self.go_to_cell(Coordinate(row=min(cur_row, max_row), column=min(max_idx, self.cursor_coordinate.column)))
         elif allow_refresh:
             self.app.log(f"Regenerating on resize. MaxIdx={max_idx}, cursor={self.cursor_coordinate}")
-            self.refresh(repaint=True)
+            self.refresh()
 
     def _post_cell_event(self, event_type: type[CustomTable.CellHighlighted | CustomTable.CellSelected]):
         col_name = self._dt.columns[self.cursor_coordinate.column]
@@ -428,19 +428,19 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self._render_header_and_table = None
             self.scroll_to(y=y_offset, x=x_offset, animate=False)
 
-        else:
+        elif old_cursor != self.cursor_coordinate:
             if requires_prep:
                 self._render_header_and_table = None
             self.refresh(repaint=True)
         event.stop()
 
-    def _build_cast_expr(self, col: str):
+    def _build_cast_expr(self, col: str, padding: int = 0):
         dtype = self._dt[col].dtype
         if dtype == pld.Categorical():
             dtype = pl.Utf8
         if dtype.is_numeric() or dtype.is_temporal():
-            return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_start(self._widths[col])
-        return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_end(self._widths[col])
+            return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_start(padding)
+        return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_end(padding)
 
     def _build_base_header(self, cols_to_render: list[str]):
         base_header = [v for k, v in self._header.items() if k in cols_to_render] + self._header_pad
@@ -453,25 +453,26 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             scroll_x, scroll_y = self.scroll_offset
 
             cols_to_render: list[str] = []
-            min_col_idx: int | None = None
             effective_width = self.scrollable_content_region.width
-            for i, x in enumerate(self._dt.columns):
+            if effective_width <= 2:
+                return (Strip([]), pl.DataFrame())
+            truncate_last: int | None = None
+            for x in self._dt.columns:
                 min_offset = self._cum_widths[x] - scroll_x
                 max_offset = min_offset + self._widths[x]
                 if min_offset < 0:
                     continue
-
-                if max_offset >= effective_width:
+                max_available = effective_width - min_offset - (2 * COL_PADDING)
+                if max_offset >= effective_width and max_available < 4:
                     break
 
                 cols_to_render.append(x)
-                if min_col_idx is None:
-                    min_col_idx = i
+                if max_offset >= effective_width:
+                    truncate_last = max_available
+                    break
+
             if not cols_to_render:
                 return (Strip([]), pl.DataFrame())
-
-            if min_col_idx is None:
-                min_col_idx = 0
 
             dt_height = self.window_region.height - HEADER_HEIGHT
 
@@ -488,6 +489,21 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 .with_row_index(DISPLAY_IDX_COL)
             )
 
+            formatters = self._formatters
+            if truncate_last:
+                formatters = self._formatters.copy()
+                old_formatter = self._build_cast_expr(cols_to_render[-1], padding=0)
+                formatters[cols_to_render[-1]] = (
+                    pl.when(old_formatter.str.len_chars() > truncate_last - 3)
+                    .then(
+                        pl.concat_str(
+                            old_formatter.str.slice(0, length=truncate_last - 3),
+                            pl.lit("..."),
+                        )
+                    )
+                    .otherwise(old_formatter)
+                )
+
             visible_cols = cols_to_render.copy()
             first_col_prefix_padding = COL_PADDING
             needed_padding = theo_max_offset - self._cum_widths[visible_cols[-1]] - first_col_prefix_padding
@@ -503,7 +519,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 if not cols:
                     return pl.lit("").str.pad_end(needed_padding)
 
-                fmts = [self._formatters[x] for x in cols]
+                fmts = [formatters[x] for x in cols]
                 if needed_padding:
                     fmts[-1] = fmts[-1].str.pad_end(needed_padding - COL_PADDING, fill_char=PADDING_STR[0])
                 concat = pl.concat_str(fmts, separator=PADDING_STR, ignore_nulls=True)
@@ -525,7 +541,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 )
             else:
 
-                cursor_col_idx = self.cursor_coordinate.column - min_col_idx
+                cursor_col_idx = self.cursor_coordinate.column - self._dt.columns.index(cols_to_render[0])
 
                 cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
                 sel_col = visible_cols[cursor_col_idx]
