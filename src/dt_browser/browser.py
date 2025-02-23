@@ -206,7 +206,7 @@ class TableFooter(Footer):
             widths.append("auto")
             with Horizontal(classes="tablefooter--search"):
                 yield Label("Search: ")
-                yield ReactiveLabel().data_bind(value=TableFooter.active_search_idx)
+                yield ReactiveLabel().data_bind(value=TableFooter.active_search_idx_display)
                 yield Label(" / ")
                 yield ReactiveLabel().data_bind(value=TableFooter.active_search_len)
 
@@ -226,7 +226,9 @@ class TableFooter(Footer):
     def compute_total_rows_display(self):
         return f" (Filtered from {self.total_rows:,})" if self.cur_total_rows != self.total_rows else ""
 
-    def compute_search_idx_display(self):
+    def compute_active_search_idx_display(self):
+        if self.active_search_idx is None:
+            return None
         return self.active_search_idx + 1
 
 
@@ -392,7 +394,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                 dt = dt.select([x for x in dt.columns if not x.startswith("__")])
                 self.is_filtered = True
                 if dt.is_empty():
-                    self.notify(f"No results found for filter: {query}", severity="warn", timeout=5)
+                    self.notify(f"No results found for filter: {query}", severity="warning", timeout=5)
                 else:
                     self._set_filtered_dt(dt, meta, new_row=0)
             except Exception as e:
@@ -414,15 +416,16 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
         (foot := self.query_one(TableFooter)).search_pending = True
         try:
-            ctx = pl.SQLContext(frames={"dt": (pl.concat([self._display_dt, self._meta_dt], how="horizontal"))})
+            idx_name = "__search_idx"
+            ctx = pl.SQLContext(frames={"dt": self._display_dt.with_row_index(idx_name)})
             query = self.active_search.replace(" && ", " and ").replace(" || ", " or ")
             search_queue = list(
-                (await ctx.execute(f"select {INDEX_COL} from dt where {query}").collect_async())[INDEX_COL]
+                (await ctx.execute(f"select {idx_name} from dt where {query}").collect_async())[idx_name]
             )
 
             foot.search_pending = False
             if not search_queue:
-                self.notify("No results found for search", severity="warn", timeout=5)
+                self.notify("No results found for search", severity="warning", timeout=5)
             else:
                 self.active_search_queue = search_queue
                 self.active_search_idx = -1
@@ -430,13 +433,15 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                     self.action_iter_search(True)
         except Exception as e:
             self.query_one(FilterBox).query_failed(query)
-            self.notify(f"Failed to run search due to: {e}", severity="error", timeout=10)
+            self.notify(f"Failed to run search due to: {e}  {repr(e)}", severity="error", timeout=10)
             foot.search_pending = False
 
     def action_iter_search(self, forward: bool):
         table = self.query_one("#main_table", CustomTable)
         coord = table.cursor_coordinate
-        self.active_search_idx += 1 if forward else -1
+        self.active_search_idx = min(
+            max(self.active_search_idx + (1 if forward else -1), 0), len(self.active_search_queue) - 1
+        )
         if self.active_search_idx >= 0 and self.active_search_idx < len(self.active_search_queue):
             next_idex = self.active_search_queue[self.active_search_idx]
             ys = next_idex
