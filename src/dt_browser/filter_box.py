@@ -132,6 +132,7 @@ FilterBox {
             with Horizontal(classes="filterbox--filterrow"):
                 yield Input(
                     value=self._active_filter[self.is_goto],
+                    placeholder="Enter SQL query to " + ("search" if self.is_goto else "filter"),
                     classes="filterbox--input",
                     suggester=self._suggestor,
                 )
