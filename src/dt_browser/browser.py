@@ -430,6 +430,10 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                 self.active_search_queue = search_queue
                 self.active_search_idx = -1
                 if goto:
+                    # Find the nearest index to the current cursor
+                    coord = self.query_one("#main_table", CustomTable).cursor_coordinate.row
+                    next_row = next((i for i, x in enumerate(self.active_search_queue) if x > coord), None)
+                    self.active_search_idx = next_row - 1
                     self.action_iter_search(True)
         except Exception as e:
             self.query_one(FilterBox).query_failed(query)
