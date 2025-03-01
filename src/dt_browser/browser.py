@@ -307,7 +307,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         ("t", "timestamp_selector", "Timestamps..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
-        ("s", "show_save", "Save dataframe as..."),
+        ("ctrl+s", "show_save", "Save dataframe as..."),
     ]
 
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
