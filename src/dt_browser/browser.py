@@ -31,6 +31,7 @@ from dt_browser.bookmarks import Bookmarks
 from dt_browser.column_selector import ColumnSelector
 from dt_browser.custom_table import CustomTable
 from dt_browser.filter_box import FilterBox
+from dt_browser.save_df_modal import SaveModal
 from dt_browser.suggestor import ColumnNameSuggestor
 
 _SHOW_COLUMNS_ID = "showColumns"
@@ -38,6 +39,14 @@ _COLOR_COLUMNS_ID = "colorColumns"
 _TS_COLUMNS_ID = "tsColumns"
 
 _TIMEZONE = str(tzlocal.get_localzone())
+
+
+def sizeof_fmt(num, suffix="B"):
+    for unit in ("", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"):
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f}Yi{suffix}"
 
 
 class TableWithBookmarks(CustomTable):
@@ -298,6 +307,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         ("t", "timestamp_selector", "Timestamps..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
+        ("s", "show_save", "Save dataframe as..."),
     ]
 
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
@@ -464,6 +474,38 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     async def action_toggle_row_detail(self):
         self.show_row_detail = not self.show_row_detail
+
+    @work
+    async def action_show_save(self):
+        target = await self.app.push_screen_wait(SaveModal())
+        if target is None:
+            return
+        self.notify(f"Saving dataframe to {target}", severity="information", timeout=3)
+
+        target = str(target)
+        num_rows = len(self._display_dt)
+        try:
+            if target.endswith(".arrows"):
+                self._display_dt.write_ipc_stream(target)
+            elif target.endswith(".arrow") or target.endswith(".feather"):
+                self._display_dt.write_ipc(target)
+            elif target.endswith(".parquet") or target.endswith(".pqt"):
+                self._display_dt.write_parquet(target)
+            elif target.endswith(".json"):
+                self._display_dt.write_json(target)
+            elif target.endswith(".csv"):
+                self._display_dt.write_csv(target)
+            else:
+                self.notify(f"Dont know how to write file {target}", severity="error", timeout=5)
+                return
+        except Exception as e:
+            self.notify(f"Failed to save to {target} due to: {e}", severity="error", timeout=10)
+            return
+
+        size = pathlib.Path(target).stat().st_size
+        self.notify(
+            f"Successfully wrote {num_rows:,} rows / {sizeof_fmt(size)} to {target}", severity="information", timeout=5
+        )
 
     async def watch_show_row_detail(self):
         if not self.show_row_detail:
