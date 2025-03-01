@@ -1,3 +1,4 @@
+import pathlib
 from dataclasses import dataclass
 
 from textual import on
@@ -53,18 +54,14 @@ FilterBox {
     def __init__(self, *args, suggestor: Suggester | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._history: list[str] = []
+        self._history_file = pathlib.Path("~/.cache/dtbrowser/filters.txt").expanduser()
+        self._history_file.parent.mkdir(exist_ok=True, parents=True)
+        if self._history_file.exists():
+            with self._history_file.open("r", encoding="utf-8") as f:
+                self._history = [x.rstrip() for x in f.readlines()]
+
         self._active_filter: dict[bool, str | None] = {True: None, False: None}
         self._suggestor = suggestor
-
-    def save_state(self, existing: dict) -> dict:
-        history = self._history.copy()
-        for x in existing["history"]:
-            if x not in history:
-                history.append(x)
-        return {"history": history}
-
-    def load_state(self, state: dict, *_):
-        self._history = state["history"]
 
     def query_failed(self, query: str):
         self._history.remove(query)
@@ -86,8 +83,15 @@ FilterBox {
         the_list = self.query_one(ListView)
         if new_value:
             self.query_one(Input).value = new_value
-            if new_value not in self._history:
+            if new_value not in self._history[0:10]:
                 self._history.append(new_value)
+                if len(self._history) < 100:
+                    with self._history_file.open("a+", encoding="utf-8") as f:
+                        f.write(f"{new_value}\n")
+                else:
+                    with self._history_file.open("w+", encoding="utf-8") as f:
+                        f.writelines([f"{x}\n" for x in self._history[-100:]])
+
                 the_list.index = None
                 await the_list.insert(0, [ListItem(Label(new_value), name=new_value)])
                 the_list.index = 0
