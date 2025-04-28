@@ -28,6 +28,12 @@ from textual.strip import Strip
 from dt_browser import COLOR_COL, COLORS, DISPLAY_IDX_COL, INDEX_COL
 
 
+def polars_list_to_string(column: pl.Expr):
+    return pl.concat_str(pl.lit("["), column.cast(pl.List(pl.String)).list.join(", "), pl.lit("]")).alias(
+        column.meta.output_name()
+    )
+
+
 def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> RenderableType:
     """Convert a cell into a Rich renderable for display.
 
@@ -218,13 +224,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             {}
             if not self._dt.columns
             else {
-                x.strip(): Segment(f"{PADDING_STR}{x}", style=self._header_style)
-                for x in (
-                    pl.DataFrame({x: [x] for x in self._dt.columns})
-                    .with_columns(self._formatters.values())
-                    .slice(0, 1)
-                    .transpose()["column_0"]
+                x.strip(): Segment(
+                    f"{PADDING_STR}{x.rjust(self._widths[x]) if dtype.is_numeric() or dtype.is_temporal() else x.ljust(self._widths[x])}",
+                    style=self._header_style,
                 )
+                for x, dtype in self._dt.schema.items()
             }
         )
 
@@ -242,15 +246,18 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             raise Exception("Cannot display a datatable with no columns")
         self._dt = dt
         self._metadata_dt = metadata_dt
-        self._widths = {x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns}
-        self._cum_widths = {
-            k: v - (self._widths[k] + COL_PADDING)
-            for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()))
-        }
+        self._set_widths({x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns})
         self._render_header_and_table = None
         self._formatters = {x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns}
         self._build_header_contents()
         self.scroll_to(0, 0, animate=False)
+
+    def _set_widths(self, widths: dict[str, int]):
+        self._widths = widths
+        self._cum_widths = {
+            k: v - (self._widths[k] + COL_PADDING)
+            for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()))
+        }
 
     def render_line(self, y, *_):
         if y >= len(self._lines):
@@ -438,9 +445,16 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         dtype = self._dt[col].dtype
         if dtype == pld.Categorical():
             dtype = pl.Utf8
+        as_str = pl.col(col).cast(pl.Utf8).fill_null("")
         if dtype.is_numeric() or dtype.is_temporal():
-            return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_start(padding)
-        return pl.col(col).cast(pl.Utf8).fill_null("").str.pad_end(padding)
+            return as_str.str.pad_start(padding)
+        if isinstance(dtype, (pl.List, pl.Array)):
+            sel = pl.col(col)
+            if isinstance(dtype, pl.Array):
+                sel = sel.arr.to_list()
+            as_str = polars_list_to_string(sel)
+
+        return as_str.str.pad_end(padding)
 
     def _build_base_header(self, cols_to_render: list[str]):
         base_header = [v for k, v in self._header.items() if k in cols_to_render] + self._header_pad
@@ -475,7 +489,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 return (Strip([]), pl.DataFrame())
 
             dt_height = self.window_region.height - HEADER_HEIGHT
-
             base_header, header_width = self._build_base_header(cols_to_render)
             excess = self.scrollable_content_region.width - header_width
             header = Strip(base_header + (self._header_pad * (excess)))
@@ -692,6 +705,24 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         return super().render_lines(crop)
 
+    @staticmethod
+    def can_draw(arr: pl.Series) -> bool:
+        if arr.is_empty():
+            return True
+        dtype = arr.dtype
+        if dtype == pld.Categorical():
+            return CustomTable.can_draw(arr.cat.get_categories())
+        if dtype.is_temporal() or dtype.is_numeric() or dtype.is_(pld.Boolean()) or dtype.is_(pld.Utf8()):
+            return True
+        if isinstance(dtype, (pl.List, pl.Array)):
+            return True
+        try:
+            # try to cast
+            arr.filter(arr.is_not_null()).head(10).cast(pl.Utf8())
+            return True
+        except pl.exceptions.PolarsError:
+            return False
+
     def _measure(self, arr: pl.Series) -> int:
         # with some types we can measure the width more efficiently
         dtype = arr.dtype
@@ -701,6 +732,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return self._measure(arr.cat.get_categories())
         if arr.is_empty():
             return 0
+
+        if isinstance(dtype, pl.Array):
+            base = arr.arr.eval(((pl.element().cast(pl.String).str.len_chars())))
+            return (base.arr.sum() + (base.arr.len() - 1) * len(", ") + 2).max()
+
+        if isinstance(dtype, pl.List):
+            base = arr.list.eval(((pl.element().cast(pl.String).str.len_chars())))
+            return (base.list.sum() + (base.list.len() - 1) * len(", ") + 2).max()
 
         if dtype.is_integer():
             col_max = arr.max()

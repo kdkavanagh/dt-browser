@@ -29,7 +29,7 @@ from dt_browser import (
 )
 from dt_browser.bookmarks import Bookmarks
 from dt_browser.column_selector import ColumnSelector
-from dt_browser.custom_table import CustomTable
+from dt_browser.custom_table import CustomTable, polars_list_to_string
 from dt_browser.filter_box import FilterBox
 from dt_browser.save_df_modal import SaveModal
 from dt_browser.suggestor import ColumnNameSuggestor
@@ -262,14 +262,22 @@ RowDetail {
             pl.DataFrame().with_row_index(name=INDEX_COL).select([INDEX_COL]),
             cursor_type=CustomTable.CursorType.NONE,
         )
+        self._schema: pl.DataFrame | None = None
 
     def watch_row_df(self):
         if self.row_df.is_empty():
             return
+        display_df = self.row_df.with_columns(
+            polars_list_to_string(pl.col(x)) if isinstance(dtype, pl.List) else pl.col(x).cast(pl.Utf8)
+            for x, dtype in self.row_df.schema.items()
+        ).transpose(include_header=True, header_name="Field", column_names=["Value"])
 
-        display_df = self.row_df.cast(pl.Utf8).transpose(
-            include_header=True, header_name="Field", column_names=["Value"]
-        )
+        if self._schema is None:
+            self._schema = pl.from_dict({k: str(v) for k, v in self.row_df.schema.items()}, strict=False).transpose(
+                include_header=True, header_name="Field", column_names=["dtype"]
+            )
+        display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
+
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
@@ -337,8 +345,11 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else source_file_or_table
         )
+        self.removed_cols = {x: v for x, v in bt.schema.items() if not CustomTable.can_draw(bt[x])}
         # bt = bt.with_columns(TestTs=datetime.datetime.now())
-        self._display_dt = self._filtered_dt = self._original_dt = bt
+        self._display_dt = self._filtered_dt = self._original_dt = bt.select(
+            [x for x in bt.columns if x not in self.removed_cols]
+        )
         self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
@@ -723,6 +734,13 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self.cur_total_rows = len(self._display_dt)
         self.total_rows = len(self._original_dt)
         self._row_detail.row_df = self._display_dt[0]
+        if self.removed_cols:
+            err_str = ", ".join(f"{k}: {v}" for k, v in self.removed_cols.items())
+            self.notify(
+                f"Removed column(s) with unsupported dtypes: {err_str}",
+                severity="warning",
+                timeout=10,
+            )
         gc.disable()
         # self.set_interval(3, self._maybe_gc)
         # message_hook.set(self._set_last_message)
