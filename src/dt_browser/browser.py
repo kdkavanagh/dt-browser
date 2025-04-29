@@ -9,7 +9,7 @@ import polars as pl
 import tzlocal
 from rich.spinner import Spinner
 from rich.style import Style
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.cache import LRUCache
@@ -264,6 +264,10 @@ RowDetail {
         )
         self._schema: pl.DataFrame | None = None
 
+    def on_resize(self, _: events.Resize):
+        tab = self.query_one(CustomTable)
+        self.can_focus_children = tab.scrollbars_enabled[0]
+
     def watch_row_df(self):
         if self.row_df.is_empty():
             return
@@ -277,10 +281,12 @@ RowDetail {
                 include_header=True, header_name="Field", column_names=["dtype"]
             )
         display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
+        coord = self._dt.cursor_coordinate
 
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
-        self._dt.refresh()
+        # self._dt.refresh()
+        self._dt.go_to_cell(coord)
 
     def compose(self):
         yield self._dt
@@ -604,12 +610,12 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self._select_interest = f"#{event.interested_widget.id}"
         self.query_one("#main_table", CustomTable).focus()
 
-    @on(CustomTable.CellHighlighted)
+    @on(CustomTable.CellHighlighted, selector="#main_table")
     async def handle_cell_highlight(self, event: CustomTable.CellHighlighted):
         self.cur_row = event.coordinate.row
         self._row_detail.row_df = self._display_dt[self.cur_row]
 
-    @on(CustomTable.CellSelected)
+    @on(CustomTable.CellSelected, selector="#main_table")
     def handle_cell_select(self, event: CustomTable.CellSelected):
         if self._select_interest:
             self.query_one(self._select_interest, ReceivesTableSelect).on_table_select(event.value)

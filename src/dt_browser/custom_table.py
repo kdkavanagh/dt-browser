@@ -194,7 +194,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         super().__init__(*args, **kwargs)
         self._dt = dt
         self._metadata_dt = metadata_dt
-        self._cursor_type = cursor_type
+        self._cursor_type = self._ori_cursor_type = cursor_type
 
         self._lines = list[Strip]()
         self._widths: dict[str, int] = {}
@@ -211,6 +211,15 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._render_header_and_table: tuple[Strip, pl.DataFrame] | None = None
 
         self.set_dt(dt, metadata_dt)
+
+    def on_focus(self, event: events.Focus):
+        if self._cursor_type == CustomTable.CursorType.NONE:
+            self._cursor_type = CustomTable.CursorType.ROW
+
+    def on_blur(self, event: events.Blur):
+        if self._ori_cursor_type != self._cursor_type:
+            self._cursor_type = self._ori_cursor_type
+            self._render_header_and_table = None
 
     def on_mount(self):
         self._cell_highlight = self.get_component_rich_style("datatable--cursor")
