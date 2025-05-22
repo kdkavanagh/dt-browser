@@ -320,6 +320,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         Binding("c", "column_selector", "Columns..."),
         ("t", "timestamp_selector", "Timestamps..."),
         ("r", "toggle_row_detail", "Toggle Row Detail"),
+        Binding("g", "first_row", "Jump to top", show=False),
+        Binding("G", "last_row", "Jump to bottom", show=False),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
         ("ctrl+s", "show_save", "Save dataframe as..."),
     ]
@@ -491,6 +493,20 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     async def action_toggle_row_detail(self):
         self.show_row_detail = not self.show_row_detail
+
+    async def action_last_row(self):
+        table = self.query_one("#main_table", CustomTable)
+        coord = table.cursor_coordinate
+        ys = len(self._display_dt) - 1
+        table.scroll_to(table.scroll_x, ys, animate=False, force=True)
+        table.move_cursor(column=coord.column, row=ys)
+
+    async def action_first_row(self):
+        table = self.query_one("#main_table", CustomTable)
+        coord = table.cursor_coordinate
+        ys = 0
+        table.scroll_to(table.scroll_x, ys, animate=False, force=True)
+        table.move_cursor(column=coord.column, row=ys)
 
     @work
     async def action_show_save(self):
