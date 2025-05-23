@@ -487,7 +487,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         row_idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
         did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
         self.refresh_bindings()
-        self.query_one("#main_table", CustomTable).refresh(repaint=True)
+        self.query_one("#main_table", CustomTable).refresh(repaint=True, layout=True)
 
         self.notify("Bookmark added!" if did_add else "Bookmark removed", severity="information", timeout=3)
 
@@ -500,6 +500,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         ys = len(self._display_dt) - 1
         table.scroll_to(table.scroll_x, ys, animate=False, force=True)
         table.move_cursor(column=coord.column, row=ys)
+        table.refresh(repaint=True, layout=True)
 
     async def action_first_row(self):
         table = self.query_one("#main_table", CustomTable)
@@ -507,6 +508,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         ys = 0
         table.scroll_to(table.scroll_x, ys, animate=False, force=True)
         table.move_cursor(column=coord.column, row=ys)
+        table.refresh(repaint=True, layout=True)
 
     @work
     async def action_show_save(self):
@@ -661,7 +663,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     def handle_bookmark_removed(self, event: Bookmarks.BookmarkRemoved):
         event.stop()
         self.refresh_bindings()
-        self.query_one("#main_table", CustomTable).refresh(repaint=True)
+        self.query_one("#main_table", CustomTable).refresh(repaint=True, layout=True)
 
     async def action_show_filter(self):
         # import gc
