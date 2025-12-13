@@ -267,6 +267,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._formatters = {x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns}
         self._build_header_contents()
         self.scroll_to(0, 0, animate=False)
+        if len(dt) <= self.cursor_coordinate.row:
+            self.go_to_cell(Coordinate(row=len(dt) - 1, column=self.cursor_coordinate.column))
 
     def _set_widths(self, widths: dict[str, int]):
         self._widths = widths
