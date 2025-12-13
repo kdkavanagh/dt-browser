@@ -215,6 +215,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._header_pad: list[Segment] = []
 
         self._render_header_and_table: tuple[Strip, pl.DataFrame] | None = None
+        self._dirty = True
 
         self.set_dt(dt, metadata_dt)
 
@@ -453,6 +454,13 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         elif old_cursor != self.cursor_coordinate:
             if requires_prep:
                 self._render_header_and_table = None
+            else:
+                # Only update the two affected lines
+                _, scroll_y = self.scroll_offset
+                lines_to_update = [old_cursor.row - scroll_y, self.cursor_coordinate.row - scroll_y]
+                strips = self._gen_segments(lines_to_update)
+                for row_idx, strip in zip(lines_to_update, strips):
+                    self._lines[row_idx + 1] = strip
             self.refresh(repaint=True)
         event.stop()
 
@@ -479,6 +487,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     @property
     def render_header_and_table(self):
         if self._render_header_and_table is None:
+            self._dirty = True
             scroll_x, scroll_y = self.scroll_offset
 
             cols_to_render: list[str] = []
@@ -612,6 +621,87 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             else struct["bgcolor"]
         )
 
+    def _gen_segments(self, lines: list[int] | None):
+        _, render_df = self.render_header_and_table
+        if lines:
+            render_df = render_df[lines]
+        rend = render_df.lazy()
+
+        strips: list[Strip] = []
+        if self._cursor_type == CustomTable.CursorType.NONE:
+            for x in rend.collect()["before_selected"]:
+                strips.append(Strip([Segment(PADDING_STR), Segment(x)]))
+        else:
+            _, scroll_y = self.scroll_offset
+            cursor_row_idx = self.cursor_coordinate.row - scroll_y
+
+            for struct in (
+                rend.with_columns(self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"))
+                .collect()
+                .iter_rows(named=True)
+            ):
+                segs = [
+                    Segment(
+                        PADDING_STR,
+                        style=Style(
+                            color=(
+                                self._cell_highlight.color.name
+                                if (
+                                    self._cursor_type == CustomTable.CursorType.ROW
+                                    and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                )
+                                else None
+                            ),
+                            bgcolor=struct["bgcolor"],
+                        ),
+                    ),
+                    Segment(
+                        struct["before_selected"],
+                        style=Style(
+                            color=(
+                                self._cell_highlight.color.name
+                                if (
+                                    self._cursor_type == CustomTable.CursorType.ROW
+                                    and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                )
+                                else struct[COLOR_COL]
+                            ),
+                            bgcolor=struct["bgcolor"],
+                        ),
+                    ),
+                    Segment(
+                        struct["selected"],
+                        style=Style(
+                            color=(
+                                self._cell_highlight.color.name
+                                if struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                else struct[COLOR_COL]
+                            ),
+                            bgcolor=(
+                                self._cell_highlight.bgcolor.name
+                                if struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                else self._get_sel_col_bg_color(struct)
+                            ),
+                        ),
+                    ),
+                    Segment(
+                        struct["after_selected"],
+                        style=Style(
+                            color=(
+                                self._cell_highlight.color.name
+                                if (
+                                    self._cursor_type == CustomTable.CursorType.ROW
+                                    and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                )
+                                else struct[COLOR_COL]
+                            ),
+                            bgcolor=struct["bgcolor"],
+                        ),
+                    ),
+                ]
+                strips.append(Strip(segs, cell_length=self.scrollable_content_region.width))
+        return strips
+
     def render_lines(self, crop: Region):
         # if self._render_header_and_table and self.scrollable_content_region.height - HEADER_HEIGHT != len(
         #     self._render_header_and_table
@@ -621,94 +711,22 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         #     self._ensure_cursor(allow_refresh=False)
         #     self._render_header_and_table = None
         cur_header, render_df = self.render_header_and_table
-
-        self._lines.clear()
-        self._lines.append(cur_header)
-        if render_df.is_empty():
-            msg = "< Empty Dataframe >"
-            padding = int((self.scrollable_content_region.width - len(msg)) / 2)
-            msg = f"{' '*padding}{msg}{' '*padding}"
-            self._lines.append(
-                Strip(
-                    [Segment(msg)],
-                    cell_length=self.scrollable_content_region.width,
+        if self._dirty:
+            self._lines.clear()
+            self._lines.append(cur_header)
+            if render_df.is_empty():
+                msg = "< Empty Dataframe >"
+                padding = int((self.scrollable_content_region.width - len(msg)) / 2)
+                msg = f"{' '*padding}{msg}{' '*padding}"
+                self._lines.append(
+                    Strip(
+                        [Segment(msg)],
+                        cell_length=self.scrollable_content_region.width,
+                    )
                 )
-            )
-        else:
-            rend = render_df.lazy()
-            if self._cursor_type == CustomTable.CursorType.NONE:
-                for x in rend.collect()["before_selected"]:
-                    self._lines.append(Strip([Segment(PADDING_STR), Segment(x)]))
             else:
-                _, scroll_y = self.scroll_offset
-                cursor_row_idx = self.cursor_coordinate.row - scroll_y
-
-                for struct in (
-                    rend.with_columns(self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"))
-                    .collect()
-                    .iter_rows(named=True)
-                ):
-                    segs = [
-                        Segment(
-                            PADDING_STR,
-                            style=Style(
-                                color=(
-                                    self._cell_highlight.color.name
-                                    if (
-                                        self._cursor_type == CustomTable.CursorType.ROW
-                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                    )
-                                    else None
-                                ),
-                                bgcolor=struct["bgcolor"],
-                            ),
-                        ),
-                        Segment(
-                            struct["before_selected"],
-                            style=Style(
-                                color=(
-                                    self._cell_highlight.color.name
-                                    if (
-                                        self._cursor_type == CustomTable.CursorType.ROW
-                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                    )
-                                    else struct[COLOR_COL]
-                                ),
-                                bgcolor=struct["bgcolor"],
-                            ),
-                        ),
-                        Segment(
-                            struct["selected"],
-                            style=Style(
-                                color=(
-                                    self._cell_highlight.color.name
-                                    if struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                    else struct[COLOR_COL]
-                                ),
-                                bgcolor=(
-                                    self._cell_highlight.bgcolor.name
-                                    if struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                    else self._get_sel_col_bg_color(struct)
-                                ),
-                            ),
-                        ),
-                        Segment(
-                            struct["after_selected"],
-                            style=Style(
-                                color=(
-                                    self._cell_highlight.color.name
-                                    if (
-                                        self._cursor_type == CustomTable.CursorType.ROW
-                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                    )
-                                    else struct[COLOR_COL]
-                                ),
-                                bgcolor=struct["bgcolor"],
-                            ),
-                        ),
-                    ]
-                    self._lines.append(Strip(segs, cell_length=self.scrollable_content_region.width))
-
+                self._lines.extend(self._gen_segments(None))
+        self._dirty = False
         return super().render_lines(crop)
 
     @staticmethod

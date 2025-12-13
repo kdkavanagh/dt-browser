@@ -286,7 +286,7 @@ RowDetail {
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
-        self._dt.go_to_cell(coord)
+        # self._dt.go_to_cell(coord)
 
     def compose(self):
         yield self._dt
