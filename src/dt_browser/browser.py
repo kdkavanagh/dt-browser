@@ -285,7 +285,7 @@ RowDetail {
 
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
-        # self._dt.refresh()
+        self._dt.refresh()
         self._dt.go_to_cell(coord)
 
     def compose(self):
@@ -353,6 +353,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             if isinstance(source_file_or_table, (str, pathlib.Path))
             else source_file_or_table
         )
+        old_cols = bt.columns
+        bt = bt.with_row_index("Row #", offset=1).with_columns(pl.col("Row #"), *old_cols)
         self.removed_cols = {x: v for x, v in bt.schema.items() if not CustomTable.can_draw(bt[x])}
         # bt = bt.with_columns(TestTs=datetime.datetime.now())
         self._display_dt = self._filtered_dt = self._original_dt = bt.select(

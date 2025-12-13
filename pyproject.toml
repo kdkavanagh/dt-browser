@@ -13,8 +13,8 @@ classifiers = [
 dependencies = [
     "click",
     "tzlocal",
-    "textual == 2.0.0",
-    "polars >= 1.0,<2.0",
+    "textual >= 6.0.0",
+    "polars >= 1.36,<2.0",
 ]
 requires-python = ">= 3.11"
 

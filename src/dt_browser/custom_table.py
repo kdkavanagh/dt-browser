@@ -189,9 +189,15 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     cursor_coordinate: Reactive[Coordinate] = Reactive(Coordinate(0, 0), repaint=False)
 
     def __init__(
-        self, dt: pl.DataFrame, metadata_dt: pl.DataFrame, *args, cursor_type: CustomTable.CursorType, **kwargs
+        self,
+        dt: pl.DataFrame,
+        metadata_dt: pl.DataFrame,
+        *args,
+        cursor_type: CustomTable.CursorType,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
+
         self._dt = dt
         self._metadata_dt = metadata_dt
         self._cursor_type = self._ori_cursor_type = cursor_type
@@ -631,86 +637,77 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         else:
             rend = render_df.lazy()
             if self._cursor_type == CustomTable.CursorType.NONE:
-                rend = rend.select(
-                    segments=pl.col("before_selected").map_elements(
-                        lambda x: [Segment(PADDING_STR), Segment(x)],
-                        return_dtype=pl.Object,
-                    )
-                )
+                for x in rend.collect()["before_selected"]:
+                    self._lines.append(Strip([Segment(PADDING_STR), Segment(x)]))
             else:
                 _, scroll_y = self.scroll_offset
                 cursor_row_idx = self.cursor_coordinate.row - scroll_y
-                rend = rend.select(
-                    segments=pl.struct(
-                        pl.col("*"),
-                        self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"),
-                    ).map_elements(
-                        lambda struct: [
-                            Segment(
-                                PADDING_STR,
-                                style=Style(
-                                    color=(
-                                        self._cell_highlight.color.name
-                                        if (
-                                            self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                        )
-                                        else None
-                                    ),
-                                    bgcolor=struct["bgcolor"],
-                                ),
-                            ),
-                            Segment(
-                                struct["before_selected"],
-                                style=Style(
-                                    color=(
-                                        self._cell_highlight.color.name
-                                        if (
-                                            self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                        )
-                                        else struct[COLOR_COL]
-                                    ),
-                                    bgcolor=struct["bgcolor"],
-                                ),
-                            ),
-                            Segment(
-                                struct["selected"],
-                                style=Style(
-                                    color=(
-                                        self._cell_highlight.color.name
-                                        if struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                        else struct[COLOR_COL]
-                                    ),
-                                    bgcolor=(
-                                        self._cell_highlight.bgcolor.name
-                                        if struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                        else self._get_sel_col_bg_color(struct)
-                                    ),
-                                ),
-                            ),
-                            Segment(
-                                struct["after_selected"],
-                                style=Style(
-                                    color=(
-                                        self._cell_highlight.color.name
-                                        if (
-                                            self._cursor_type == CustomTable.CursorType.ROW
-                                            and struct[DISPLAY_IDX_COL] == cursor_row_idx
-                                        )
-                                        else struct[COLOR_COL]
-                                    ),
-                                    bgcolor=struct["bgcolor"],
-                                ),
-                            ),
-                        ],
-                        return_dtype=pl.Object,
-                    )
-                )
 
-            self._lines.extend(
-                Strip(x, cell_length=self.scrollable_content_region.width) for x in rend.collect()["segments"]
-            )
+                for struct in (
+                    rend.with_columns(self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"))
+                    .collect()
+                    .iter_rows(named=True)
+                ):
+                    segs = [
+                        Segment(
+                            PADDING_STR,
+                            style=Style(
+                                color=(
+                                    self._cell_highlight.color.name
+                                    if (
+                                        self._cursor_type == CustomTable.CursorType.ROW
+                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                    )
+                                    else None
+                                ),
+                                bgcolor=struct["bgcolor"],
+                            ),
+                        ),
+                        Segment(
+                            struct["before_selected"],
+                            style=Style(
+                                color=(
+                                    self._cell_highlight.color.name
+                                    if (
+                                        self._cursor_type == CustomTable.CursorType.ROW
+                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                    )
+                                    else struct[COLOR_COL]
+                                ),
+                                bgcolor=struct["bgcolor"],
+                            ),
+                        ),
+                        Segment(
+                            struct["selected"],
+                            style=Style(
+                                color=(
+                                    self._cell_highlight.color.name
+                                    if struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                    else struct[COLOR_COL]
+                                ),
+                                bgcolor=(
+                                    self._cell_highlight.bgcolor.name
+                                    if struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                    else self._get_sel_col_bg_color(struct)
+                                ),
+                            ),
+                        ),
+                        Segment(
+                            struct["after_selected"],
+                            style=Style(
+                                color=(
+                                    self._cell_highlight.color.name
+                                    if (
+                                        self._cursor_type == CustomTable.CursorType.ROW
+                                        and struct[DISPLAY_IDX_COL] == cursor_row_idx
+                                    )
+                                    else struct[COLOR_COL]
+                                ),
+                                bgcolor=struct["bgcolor"],
+                            ),
+                        ),
+                    ]
+                    self._lines.append(Strip(segs, cell_length=self.scrollable_content_region.width))
 
         return super().render_lines(crop)
 
