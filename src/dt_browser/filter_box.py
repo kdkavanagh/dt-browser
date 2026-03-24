@@ -107,7 +107,7 @@ FilterBox {
     @on(ListView.Selected)
     def input_historical(self, event: ListView.Selected):
         box = self.query_one(Input)
-        box.value = event.item.name
+        box.value = event.item.name or ""
         box.focus()
 
     def key_down(self):

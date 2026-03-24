@@ -44,17 +44,6 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 ignore_missing_imports = true
-disable_error_code = [
-    "union-attr",
-    "index",
-    "assignment",
-    "attr-defined",
-    "arg-type",
-    "operator",
-    "return-value",
-    "abstract",
-    "type-abstract",
-]
 
 [tool.ruff]
 line-length = 120

@@ -2,7 +2,7 @@ import datetime
 import gc
 import pathlib
 import time
-from typing import ClassVar
+from typing import Any, ClassVar, Literal
 
 import click
 import polars as pl
@@ -29,7 +29,7 @@ from dt_browser import (
 )
 from dt_browser.bookmarks import Bookmarks
 from dt_browser.column_selector import ColumnSelector
-from dt_browser.custom_table import CustomTable, polars_list_to_string
+from dt_browser.custom_table import CustomTable, _color_name, polars_list_to_string
 from dt_browser.filter_box import FilterBox
 from dt_browser.save_df_modal import SaveModal
 from dt_browser.suggestor import ColumnNameSuggestor
@@ -72,18 +72,18 @@ TableWithBookmarks > .datatable--row-search-result {
     def __init__(self, *args, bookmarks: Bookmarks, **kwargs):
         super().__init__(*args, **kwargs)
         self._bookmarks = bookmarks
-        self._bookmark_highlight: Style | None = None
-        self._search_highlight: Style | None = None
+        self._bookmark_highlight: Style = Style.null()
+        self._search_highlight: Style = Style.null()
 
     def on_mount(self):
         self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
         self._search_highlight = self.get_component_rich_style("datatable--row-search-result")
 
-    def _get_sel_col_bg_color(self, struct: pl.Struct):
+    def _get_sel_col_bg_color(self, struct: dict[str, Any]) -> str:
         if self.active_search_queue and struct[INDEX_COL] in self.active_search_queue:
-            return self._search_highlight.bgcolor.name
+            return _color_name(self._search_highlight.bgcolor)
         if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
-            return self._bookmark_highlight.bgcolor.name
+            return _color_name(self._bookmark_highlight.bgcolor)
         return super()._get_sel_col_bg_color(struct)
 
     def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
@@ -91,13 +91,13 @@ TableWithBookmarks > .datatable--row-search-result {
         if self.active_search_queue:
             tmp = (
                 pl.when(pl.col(INDEX_COL).is_in(self.active_search_queue))
-                .then(pl.lit(self._search_highlight.bgcolor.name))
+                .then(pl.lit(_color_name(self._search_highlight.bgcolor)))
                 .otherwise(tmp)
             )
         if self._bookmarks.has_bookmarks:
             tmp = (
                 pl.when(pl.col(INDEX_COL).is_in(self._bookmarks.meta_dt[INDEX_COL]))
-                .then(pl.lit(self._bookmark_highlight.bgcolor.name))
+                .then(pl.lit(_color_name(self._bookmark_highlight.bgcolor)))
                 .otherwise(tmp)
             )
         return tmp
@@ -108,7 +108,8 @@ _ALREADY_DT = "dt"
 
 def _guess_timestamp_cols(df: pl.DataFrame):
     date_range = pl.Series(values=[datetime.date(2001, 1, 1), datetime.date(2042, 1, 1)])
-    converts = [(x,) + tuple(date_range.dt.epoch(x)) for x in ("s", "ms", "us", "ns")]
+    epoch_units: tuple[Literal["s", "ms", "us", "ns"], ...] = ("s", "ms", "us", "ns")
+    converts = [(x,) + tuple(date_range.dt.epoch(x)) for x in epoch_units]
 
     for col, dtype in df.schema.items():
         if dtype.is_integer():
@@ -342,7 +343,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     active_search: reactive[str | None] = reactive(None)
     # active_dt: reactive[pl.DataFrame] = reactive(pl.DataFrame(), init=False, always_update=True)
 
-    def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
+    def __init__(self, table_name: str | pathlib.Path, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
         bt = (
             from_file_path(source_file_or_table)
@@ -463,7 +464,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
                 if goto:
                     # Find the nearest index to the current cursor
                     coord = self.query_one("#main_table", CustomTable).cursor_coordinate.row
-                    next_row = next((i for i, x in enumerate(self.active_search_queue) if x > coord), None)
+                    next_row = next((i for i, x in enumerate(self.active_search_queue) if x > coord), 0)
                     self.active_search_idx = next_row - 1
                     self.action_iter_search(True)
         except Exception as e:
@@ -472,12 +473,14 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
             foot.search_pending = False
 
     def action_iter_search(self, forward: bool):
+        if self.active_search_queue is None or self.active_search_idx is None:
+            return
         table = self.query_one("#main_table", CustomTable)
         coord = table.cursor_coordinate
         self.active_search_idx = min(
             max(self.active_search_idx + (1 if forward else -1), 0), len(self.active_search_queue) - 1
         )
-        if self.active_search_idx >= 0 and self.active_search_idx < len(self.active_search_queue):
+        if 0 <= self.active_search_idx < len(self.active_search_queue):
             next_idex = self.active_search_queue[self.active_search_idx]
             ys = next_idex
             xs = table.scroll_x
@@ -638,7 +641,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     @on(CustomTable.CellSelected, selector="#main_table")
     def handle_cell_select(self, event: CustomTable.CellSelected):
         if self._select_interest:
-            self.query_one(self._select_interest, ReceivesTableSelect).on_table_select(event.value)
+            self.query_one(self._select_interest, ReceivesTableSelect).on_table_select(event.value)  # type: ignore[type-abstract]
             self._select_interest = None
 
     @on(Bookmarks.BookmarkSelected)
@@ -800,7 +803,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
 
 class DtBrowserApp(App):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
-    def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
+    def __init__(self, table_name: str | pathlib.Path, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
         self._table_name = table_name
         self._source = source_file_or_table

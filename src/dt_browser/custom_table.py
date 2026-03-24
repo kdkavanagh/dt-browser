@@ -10,6 +10,7 @@ import polars.datatypes as pld
 import rich.repr
 from polars.interchange.protocol import Column
 from rich.align import Align
+from rich.color import Color
 from rich.console import Console, RenderableType
 from rich.errors import MarkupError
 from rich.markup import escape
@@ -26,6 +27,11 @@ from textual.scroll_view import ScrollView
 from textual.strip import Strip
 
 from dt_browser import COLOR_COL, COLORS, DISPLAY_IDX_COL, INDEX_COL
+
+
+def _color_name(color: Color | None) -> str:
+    """Extract the name from a Rich Color, defaulting to empty string if None."""
+    return color.name if color is not None else ""
 
 
 def polars_list_to_string(column: pl.Expr):
@@ -63,7 +69,7 @@ def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> Re
     if isinstance(obj, (float, pl.Decimal)):
         return Align(f"{obj:n}", align="right")
     if isinstance(obj, int):
-        if col is not None and col.is_id:
+        if col is not None and getattr(col, "is_id", False):
             # no separators in ID fields
             return Align(str(obj), align="right")
         return Align(f"{obj:n}", align="right")
@@ -206,9 +212,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._cum_widths: dict[str, int] = {}
         self._formatters: dict[str, pl.Expr] = {}
 
-        self._cell_highlight: Style | None = None
-        self._header_style: Style | None = None
-        self._row_col_highlight: Style | None = None
+        self._cell_highlight: Style = Style.null()
+        self._header_style: Style = Style.null()
+        self._row_col_highlight: Style = Style.null()
 
         self._header: dict[str, Segment] = {}
         self._header_pad: list[Segment] = []
@@ -467,7 +473,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     def _build_cast_expr(self, col: str, padding: int = 0):
         dtype = self._dt[col].dtype
         if dtype == pld.Categorical():
-            dtype = pl.Utf8
+            dtype = pl.String()
         as_str = pl.col(col).cast(pl.Utf8).fill_null("")
         if dtype.is_numeric() or dtype.is_temporal():
             return as_str.str.pad_start(padding)
@@ -605,17 +611,17 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             pl.when(pl.col(DISPLAY_IDX_COL) == cursor_row_idx)
             .then(
                 pl.lit(
-                    self._row_col_highlight.bgcolor.name
+                    _color_name(self._row_col_highlight.bgcolor)
                     if self._cursor_type == CustomTable.CursorType.CELL
-                    else self._cell_highlight.bgcolor.name
+                    else _color_name(self._cell_highlight.bgcolor)
                 )
             )
             .otherwise(pl.lit(None))
         )
 
-    def _get_sel_col_bg_color(self, struct: pl.Struct):
+    def _get_sel_col_bg_color(self, struct: dict[str, Any]):
         return (
-            self._row_col_highlight.bgcolor.name
+            _color_name(self._row_col_highlight.bgcolor)
             if self._cursor_type == CustomTable.CursorType.CELL
             else struct["bgcolor"]
         )
@@ -644,7 +650,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         PADDING_STR,
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -658,7 +664,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["before_selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -672,12 +678,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if struct[DISPLAY_IDX_COL] == cursor_row_idx
                                 else struct[COLOR_COL]
                             ),
                             bgcolor=(
-                                self._cell_highlight.bgcolor.name
+                                _color_name(self._cell_highlight.bgcolor)
                                 if struct[DISPLAY_IDX_COL] == cursor_row_idx
                                 else self._get_sel_col_bg_color(struct)
                             ),
@@ -687,7 +693,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["after_selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -758,11 +764,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         if isinstance(dtype, pl.Array):
             base = arr.arr.eval(pl.element().cast(pl.String).str.len_chars())
-            return (base.arr.sum() + (base.arr.len() - 1) * len(", ") + 2).max()
+            return cast(int, (base.arr.sum() + (base.arr.len() - 1) * len(", ") + 2).max())
 
         if isinstance(dtype, pl.List):
             base = arr.list.eval(pl.element().cast(pl.String).str.len_chars())
-            return (base.list.sum() + (base.list.len() - 1) * len(", ") + 2).max()
+            return cast(int, (base.list.sum() + (base.list.len() - 1) * len(", ") + 2).max())
 
         if dtype.is_integer():
             col_max = arr.max()
