@@ -39,7 +39,7 @@ OverwriteWarning {
  align: center middle;
 
 }
-    
+
 OverwriteWarning > #dialog {
     grid-size: 2;
     grid-gutter: 1 2;
@@ -90,7 +90,7 @@ SaveModal {
  align: center middle;
 
 }
-    
+
 SaveModal > #dialog {
     grid-size: 1 5;
     grid-gutter: 1;

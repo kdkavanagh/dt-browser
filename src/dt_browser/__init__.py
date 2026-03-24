@@ -35,7 +35,6 @@ DISPLAY_IDX_COL = "_display_index"
 
 
 class HasState:
-
     @abstractmethod
     def save_state(self, existing: dict) -> dict:
         """
@@ -59,7 +58,6 @@ class HasState:
 
 
 class ReactiveLabel(Label):
-
     value: reactive[str] = reactive("", layout=True)
 
     def render(self):
@@ -69,7 +67,6 @@ class ReactiveLabel(Label):
 
 
 class ReceivesTableSelect(Widget):
-
     BINDINGS = [
         ("ctrl+t", "select_from_table()", "Select/copy value from table"),
     ]

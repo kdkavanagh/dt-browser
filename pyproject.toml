@@ -23,15 +23,12 @@ Homepage = "https://github.com/kdkavanagh/dt-browser"
 
 [project.optional-dependencies]
 dev = [
-    "black",
-    "isort",
+    "mypy",
     "pylint",
     "pytest",
     "pytest-asyncio",
+    "ruff",
 ]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
 
 [project.scripts]
 dtbrowser = "dt_browser.browser:run"
@@ -42,10 +39,133 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 
-[tool.black]
-line-length = 120
-target-version = ['py312']
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
-[tool.isort]
-atomic = true
-profile = "black"
+[tool.mypy]
+ignore_missing_imports = true
+disable_error_code = [
+    "union-attr",
+    "index",
+    "assignment",
+    "attr-defined",
+    "arg-type",
+    "operator",
+    "return-value",
+    "abstract",
+    "type-abstract",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dt_browser"]
+
+[tool.pylint.main]
+py-version = "3.12"
+jobs = 1
+fail-under = 10
+load-plugins = []
+ignore = ["CVS"]
+ignore-patterns = ["^\\.#"]
+
+[tool.pylint.basic]
+argument-naming-style = "snake_case"
+attr-naming-style = "snake_case"
+class-attribute-naming-style = "any"
+class-const-naming-style = "UPPER_CASE"
+class-naming-style = "PascalCase"
+const-naming-style = "UPPER_CASE"
+function-naming-style = "snake_case"
+method-naming-style = "snake_case"
+module-naming-style = "snake_case"
+variable-naming-style = "snake_case"
+inlinevar-naming-style = "any"
+no-docstring-rgx = "^_"
+good-names = ["i", "j", "k", "ex", "Run", "_"]
+
+[tool.pylint.classes]
+check-protected-access-in-special-methods = false
+defining-attr-methods = ["__init__", "__new__", "setUp", "asyncSetUp", "__post_init__"]
+exclude-protected = ["_asdict", "_fields", "_replace", "_source", "_make", "os._exit"]
+
+[tool.pylint.design]
+max-args = 5
+max-attributes = 7
+max-bool-expr = 5
+max-branches = 12
+max-locals = 15
+max-parents = 7
+max-public-methods = 20
+max-returns = 6
+max-statements = 50
+min-public-methods = 2
+
+[tool.pylint.format]
+max-line-length = 120
+max-module-lines = 1000
+
+[tool.pylint."messages control"]
+disable = [
+    "raw-checker-failed",
+    "bad-inline-option",
+    "locally-disabled",
+    "file-ignored",
+    "suppressed-message",
+    "useless-suppression",
+    "deprecated-pragma",
+    "use-symbolic-message-instead",
+    "use-implicit-booleaness-not-comparison-to-string",
+    "use-implicit-booleaness-not-comparison-to-zero",
+    "missing-function-docstring",
+    "missing-class-docstring",
+    "missing-module-docstring",
+    "too-few-public-methods",
+    "too-many-return-statements",
+    "too-many-instance-attributes",
+    "too-many-branches",
+    "too-many-locals",
+    "too-many-statements",
+    "line-too-long",
+    "unused-variable",
+    "unused-argument",
+    "broad-exception-caught",
+    "broad-exception-raised",
+    "abstract-method",
+]
+
+[tool.pylint.imports]
+known-third-party = ["enchant"]
+
+[tool.pylint.logging]
+logging-format-style = "old"
+
+[tool.pylint.refactoring]
+max-nested-blocks = 5
+
+[tool.pylint.reports]
+reports = false
+score = true
+
+[tool.pylint.similarities]
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
+min-similarity-lines = 4

@@ -50,7 +50,6 @@ def sizeof_fmt(num, suffix="B"):
 
 
 class TableWithBookmarks(CustomTable):
-
     DEFAULT_CSS = (
         CustomTable.DEFAULT_CSS
         + """
@@ -242,7 +241,6 @@ class TableFooter(Footer):
 
 
 class RowDetail(Widget, can_focus=False, can_focus_children=False):
-
     DEFAULT_CSS = """
 RowDetail {
     width: auto;
@@ -281,8 +279,6 @@ RowDetail {
                 include_header=True, header_name="Field", column_names=["dtype"]
             )
         display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
-        coord = self._dt.cursor_coordinate
-
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
@@ -378,7 +374,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self._ts_col_names: dict[str, str] = {}
         self.available_timestamp_columns = tuple(self._ts_cols.keys())
 
-        # Necessary to prevent the main table from resizing to 0 when the col selectors are mounted and then immediately resizing
+        # Necessary to prevent the main table from resizing to 0 when the col selectors
+        # are mounted and then immediately resizing
         # (apparently that happens when col selector width = auto)
         self._color_selector.styles.width = 1
         self._column_selector.styles.width = 1
@@ -803,7 +800,6 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
 
 class DtBrowserApp(App):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
-
     def __init__(self, table_name: str, source_file_or_table: pathlib.Path | pl.DataFrame):
         super().__init__()
         self._table_name = table_name

@@ -13,10 +13,11 @@ $(.VENV):
 	@$(ACTIVATE) && uv pip install -e .[dev]
 
 .make.formatted: $(SRCS) | $(.VENV)
-	@$(ACTIVATE) && isort src/
-	@$(ACTIVATE) && black src/
+	@$(ACTIVATE) && ruff check --select I --fix src/
+	@$(ACTIVATE) && ruff format src/
 
 .make.linted: $(SRCS) .make.formatted | $(.VENV)
+	@$(ACTIVATE) && ruff check src/
 	@$(ACTIVATE) && pylint src/
 
 .make.typed: $(SRCS) .make.formatted | $(.VENV)
