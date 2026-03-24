@@ -98,10 +98,7 @@ FilterBox {
         else:
             the_list.index = None
         self._active_filter[self.is_goto] = new_value
-        if self.is_goto:
-            msg = FilterBox.GoToSubmitted(value=new_value)
-        else:
-            msg = FilterBox.FilterSubmitted(value=new_value)
+        msg = FilterBox.GoToSubmitted(value=new_value) if self.is_goto else FilterBox.FilterSubmitted(value=new_value)
         self.post_message(msg)
 
     def get_value(self):
@@ -110,7 +107,7 @@ FilterBox {
     @on(ListView.Selected)
     def input_historical(self, event: ListView.Selected):
         box = self.query_one(Input)
-        box.value = event.item.name
+        box.value = event.item.name or ""
         box.focus()
 
     def key_down(self):

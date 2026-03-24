@@ -16,7 +16,6 @@ def remove_row(dt: pl.DataFrame, rem_row: int):
 
 
 class Bookmarks(Widget):
-
     @dataclass
     class BookmarkSelected(Message):
         selected_index: int

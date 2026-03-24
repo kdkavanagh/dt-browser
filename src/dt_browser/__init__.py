@@ -35,31 +35,10 @@ DISPLAY_IDX_COL = "_display_index"
 
 
 class HasState:
-
-    @abstractmethod
-    def save_state(self, existing: dict) -> dict:
-        """
-        Generate any persistent data from this object
-
-        Args:
-            existing: Any existing state for this object which should be merged with the current state.
-            (e.g if there are multiple instances of the browser which should be merged into a single state object)
-        """
-
-    @abstractmethod
-    def load_state(self, state: dict, table_name: str, df: pl.DataFrame):
-        """
-        Apply the provided state to the current object
-
-        Args:
-            state: the state
-            table_name: the current table name being displayed
-            df: The full dataframe being displayed
-        """
+    pass
 
 
 class ReactiveLabel(Label):
-
     value: reactive[str] = reactive("", layout=True)
 
     def render(self):
@@ -69,7 +48,6 @@ class ReactiveLabel(Label):
 
 
 class ReceivesTableSelect(Widget):
-
     BINDINGS = [
         ("ctrl+t", "select_from_table()", "Select/copy value from table"),
     ]

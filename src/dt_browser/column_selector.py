@@ -12,7 +12,6 @@ _INPUT_HINT = "Type to filter columns list..."
 
 
 class ColumnSelector(Widget):
-
     DEFAULT_CSS = """
     ColumnSelector {
         dock: right;

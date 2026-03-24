@@ -10,6 +10,7 @@ import polars.datatypes as pld
 import rich.repr
 from polars.interchange.protocol import Column
 from rich.align import Align
+from rich.color import Color
 from rich.console import Console, RenderableType
 from rich.errors import MarkupError
 from rich.markup import escape
@@ -26,6 +27,11 @@ from textual.scroll_view import ScrollView
 from textual.strip import Strip
 
 from dt_browser import COLOR_COL, COLORS, DISPLAY_IDX_COL, INDEX_COL
+
+
+def _color_name(color: Color | None) -> str:
+    """Extract the name from a Rich Color, defaulting to empty string if None."""
+    return color.name if color is not None else ""
 
 
 def polars_list_to_string(column: pl.Expr):
@@ -63,7 +69,7 @@ def cell_formatter(obj: object, null_rep: Text, col: Column | None = None) -> Re
     if isinstance(obj, (float, pl.Decimal)):
         return Align(f"{obj:n}", align="right")
     if isinstance(obj, int):
-        if col is not None and col.is_id:
+        if col is not None and getattr(col, "is_id", False):
             # no separators in ID fields
             return Align(str(obj), align="right")
         return Align(f"{obj:n}", align="right")
@@ -90,7 +96,6 @@ PADDING_STR = " " * COL_PADDING
 
 
 class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
-
     class CursorType(Enum):
         ROW = auto()
         CELL = auto()
@@ -207,9 +212,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._cum_widths: dict[str, int] = {}
         self._formatters: dict[str, pl.Expr] = {}
 
-        self._cell_highlight: Style | None = None
-        self._header_style: Style | None = None
-        self._row_col_highlight: Style | None = None
+        self._cell_highlight: Style = Style.null()
+        self._header_style: Style = Style.null()
+        self._row_col_highlight: Style = Style.null()
 
         self._header: dict[str, Segment] = {}
         self._header_pad: list[Segment] = []
@@ -241,7 +246,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             if not self._dt.columns
             else {
                 x.strip(): Segment(
-                    f"{PADDING_STR}{x.rjust(self._widths[x]) if dtype.is_numeric() or dtype.is_temporal() else x.ljust(self._widths[x])}",
+                    f"{PADDING_STR}{x.rjust(self._widths[x]) if dtype.is_numeric() or dtype.is_temporal() else x.ljust(self._widths[x])}",  # noqa: E501
                     style=self._header_style,
                 )
                 for x, dtype in self._dt.schema.items()
@@ -274,7 +279,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._widths = widths
         self._cum_widths = {
             k: v - (self._widths[k] + COL_PADDING)
-            for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()))
+            for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()), strict=False)
         }
 
     def render_line(self, y, *_):
@@ -305,9 +310,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         col_name = self._dt.columns[column]
         needed_x_offset = self._cum_widths[col_name]
         needed_max_x = needed_x_offset + self._widths[col_name]
-        if x_offset >= needed_x_offset or needed_max_x >= (x_offset + self.scrollable_content_region.width):
-            return False
-        return True
+        return not (x_offset >= needed_x_offset or needed_max_x >= (x_offset + self.scrollable_content_region.width))
 
     def _is_coordinate_visible(self, coordinate: Coordinate):
         y_offset = self.scroll_offset.y
@@ -337,13 +340,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         # If it was off-screen, scroll to it, else refresh just to update the coloring
         if not cur_visible:
-            self.app.log(
-                f"Cell {coordinate} was determined to not be visible in scroll offset={self.scroll_offset}, scrolling..."
-            )
+            self.app.log(f"Cell {coordinate} not visible in scroll offset={self.scroll_offset}, scrolling...")
             self.scroll_to(y=coordinate.row, x=self._find_minimal_x_offset(coordinate), animate=False)
         else:
             self.app.log(
-                f"Currently visible, no need to scorll.  Coord={self.cursor_coordinate} isNone={self._render_header_and_table is None}"
+                f"Currently visible, no need to scroll. Coord={self.cursor_coordinate}"
+                f" isNone={self._render_header_and_table is None}"
             )
             self.refresh(repaint=True)
 
@@ -366,7 +368,9 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             cur_row = self.cursor_coordinate.row
             max_row = self.scroll_offset[1] + (self.scrollable_content_region.height - 1)
             self.app.log(
-                f"Going to cell due to resize.  coord={self.cursor_coordinate}, NewCol={min(max_idx, self.cursor_coordinate.column)} MaxIdx={max_idx}, height={self.scrollable_content_region.height}"
+                f"Going to cell due to resize. coord={self.cursor_coordinate},"
+                f" NewCol={min(max_idx, self.cursor_coordinate.column)}"
+                f" MaxIdx={max_idx}, height={self.scrollable_content_region.height}"
             )
             self.go_to_cell(Coordinate(row=min(cur_row, max_row), column=min(max_idx, self.cursor_coordinate.column)))
         elif allow_refresh:
@@ -461,7 +465,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 _, scroll_y = self.scroll_offset
                 lines_to_update = [old_cursor.row - scroll_y, self.cursor_coordinate.row - scroll_y]
                 strips = self._gen_segments(lines_to_update)
-                for row_idx, strip in zip(lines_to_update, strips):
+                for row_idx, strip in zip(lines_to_update, strips, strict=False):
                     self._lines[row_idx + 1] = strip
             self.refresh(repaint=True)
         event.stop()
@@ -469,7 +473,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     def _build_cast_expr(self, col: str, padding: int = 0):
         dtype = self._dt[col].dtype
         if dtype == pld.Categorical():
-            dtype = pl.Utf8
+            dtype = pl.String()
         as_str = pl.col(col).cast(pl.Utf8).fill_null("")
         if dtype.is_numeric() or dtype.is_temporal():
             return as_str.str.pad_start(padding)
@@ -579,7 +583,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                     after_selected=pl.lit(""),
                 )
             else:
-
                 cursor_col_idx = self.cursor_coordinate.column - self._dt.columns.index(visible_cols[0])
 
                 cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
@@ -608,17 +611,17 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             pl.when(pl.col(DISPLAY_IDX_COL) == cursor_row_idx)
             .then(
                 pl.lit(
-                    self._row_col_highlight.bgcolor.name
+                    _color_name(self._row_col_highlight.bgcolor)
                     if self._cursor_type == CustomTable.CursorType.CELL
-                    else self._cell_highlight.bgcolor.name
+                    else _color_name(self._cell_highlight.bgcolor)
                 )
             )
             .otherwise(pl.lit(None))
         )
 
-    def _get_sel_col_bg_color(self, struct: pl.Struct):
+    def _get_sel_col_bg_color(self, struct: dict[str, Any]):
         return (
-            self._row_col_highlight.bgcolor.name
+            _color_name(self._row_col_highlight.bgcolor)
             if self._cursor_type == CustomTable.CursorType.CELL
             else struct["bgcolor"]
         )
@@ -647,7 +650,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         PADDING_STR,
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -661,7 +664,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["before_selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -675,12 +678,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if struct[DISPLAY_IDX_COL] == cursor_row_idx
                                 else struct[COLOR_COL]
                             ),
                             bgcolor=(
-                                self._cell_highlight.bgcolor.name
+                                _color_name(self._cell_highlight.bgcolor)
                                 if struct[DISPLAY_IDX_COL] == cursor_row_idx
                                 else self._get_sel_col_bg_color(struct)
                             ),
@@ -690,7 +693,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                         struct["after_selected"],
                         style=Style(
                             color=(
-                                self._cell_highlight.color.name
+                                _color_name(self._cell_highlight.color)
                                 if (
                                     self._cursor_type == CustomTable.CursorType.ROW
                                     and struct[DISPLAY_IDX_COL] == cursor_row_idx
@@ -719,7 +722,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             if render_df.is_empty():
                 msg = "< Empty Dataframe >"
                 padding = int((self.scrollable_content_region.width - len(msg)) / 2)
-                msg = f"{' '*padding}{msg}{' '*padding}"
+                msg = f"{' ' * padding}{msg}{' ' * padding}"
                 self._lines.append(
                     Strip(
                         [Segment(msg)],
@@ -760,12 +763,12 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             return 0
 
         if isinstance(dtype, pl.Array):
-            base = arr.arr.eval(((pl.element().cast(pl.String).str.len_chars())))
-            return (base.arr.sum() + (base.arr.len() - 1) * len(", ") + 2).max()
+            base = arr.arr.eval(pl.element().cast(pl.String).str.len_chars())
+            return cast(int, (base.arr.sum() + (base.arr.len() - 1) * len(", ") + 2).max())
 
         if isinstance(dtype, pl.List):
-            base = arr.list.eval(((pl.element().cast(pl.String).str.len_chars())))
-            return (base.list.sum() + (base.list.len() - 1) * len(", ") + 2).max()
+            base = arr.list.eval(pl.element().cast(pl.String).str.len_chars())
+            return cast(int, (base.list.sum() + (base.list.len() - 1) * len(", ") + 2).max())
 
         if dtype.is_integer():
             col_max = arr.max()
