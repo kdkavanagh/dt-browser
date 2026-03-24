@@ -26,7 +26,12 @@ dev = [
     "black",
     "isort",
     "pylint",
+    "pytest",
+    "pytest-asyncio",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [project.scripts]
 dtbrowser = "dt_browser.browser:run"

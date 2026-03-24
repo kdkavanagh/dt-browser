@@ -437,6 +437,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     @on(FilterBox.GoToSubmitted)
     async def apply_search(self, event: FilterBox.GoToSubmitted):
         self.active_search = event.value
+        if existing := self.query("#filter"):
+            existing.remove()
+        self.query_one("#main_table", CustomTable).focus()
 
     @work(exclusive=True)
     async def watch_active_search(self, goto: bool = True):
