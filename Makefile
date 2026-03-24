@@ -25,6 +25,9 @@ $(.VENV):
 activate: .make.package_installed
 	@bash --init-file <(echo "$(ACTIVATE)")
 
+test: .make.package_installed | $(.VENV)
+	@$(ACTIVATE) && pytest tests/
+
 check: .make.formatted .make.linted .make.typed
 
 clean:
