@@ -27,6 +27,7 @@ dev = [
     "pylint",
     "pytest",
     "pytest-asyncio",
+    "pytest-textual-snapshot",
     "ruff",
 ]
 

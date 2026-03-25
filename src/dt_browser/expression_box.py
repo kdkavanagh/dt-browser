@@ -128,7 +128,8 @@ ExpressionBox {
     @on(ListView.Selected)
     def input_historical(self, event: ListView.Selected):
         box = self.query_one(Input)
-        box.value = f"{event.item.name} = {self.current_expressions[event.item.name]}"
+        name = event.item.name or ""
+        box.value = f"{name} = {self.current_expressions[name]}"
         box.focus()
 
     def key_down(self):
