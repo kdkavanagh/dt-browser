@@ -19,13 +19,18 @@ def _numeric_stats(series: pl.Series) -> list[tuple[str, str]]:
     s = series.drop_nulls()
     if s.is_empty():
         return [("", "No data")]
-    return [
+    stats = [
         ("Min", str(s.min())),
         ("Q1", str(s.quantile(0.25))),
         ("Median", str(s.median())),
         ("Q3", str(s.quantile(0.75))),
         ("Max", str(s.max())),
     ]
+    if s.dtype.is_float():
+        nan_count = s.is_nan().sum()
+        if nan_count > 0:
+            stats.append(("NaN", str(nan_count)))
+    return stats
 
 
 def _temporal_stats(series: pl.Series) -> list[tuple[str, str]]:
@@ -42,26 +47,28 @@ def _boolean_stats(series: pl.Series) -> list[tuple[str, str]]:
     true_count = series.sum()
     null_count = series.null_count()
     false_count = len(series) - (true_count or 0) - null_count
-    stats: list[tuple[str, str]] = [
+    return [
         ("True", str(true_count)),
         ("False", str(false_count)),
     ]
-    if null_count > 0:
-        stats.append(("Null", str(null_count)))
-    return stats
 
 
 def compute_column_stats(series: pl.Series) -> list[tuple[str, str]]:
     dtype = series.dtype
     if dtype == pl.Categorical:
-        return _categorical_stats(series)
-    if dtype.is_numeric():
-        return _numeric_stats(series)
-    if dtype.is_temporal():
-        return _temporal_stats(series)
-    if dtype.is_(pl.Boolean):
-        return _boolean_stats(series)
-    return []
+        stats = _categorical_stats(series)
+    elif dtype.is_numeric():
+        stats = _numeric_stats(series)
+    elif dtype.is_temporal():
+        stats = _temporal_stats(series)
+    elif dtype.is_(pl.Boolean):
+        stats = _boolean_stats(series)
+    else:
+        return []
+    null_count = series.null_count()
+    if null_count > 0:
+        stats.append(("Null", str(null_count)))
+    return stats
 
 
 class ColumnMetadata(Widget, can_focus=False, can_focus_children=False):

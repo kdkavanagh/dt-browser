@@ -90,6 +90,49 @@ def test_boolean_stats_with_nulls():
     assert null_val == "2"
 
 
+def test_numeric_stats_with_nulls():
+    series = pl.Series("val", [1.0, None, 3.0, None, 5.0])
+    stats = compute_column_stats(series)
+    labels = [s[0] for s in stats]
+    assert "Null" in labels
+    null_val = next(s[1] for s in stats if s[0] == "Null")
+    assert null_val == "2"
+
+
+def test_numeric_stats_with_nans():
+    series = pl.Series("val", [1.0, float("nan"), 3.0, float("nan"), 5.0])
+    stats = compute_column_stats(series)
+    labels = [s[0] for s in stats]
+    assert "NaN" in labels
+    nan_val = next(s[1] for s in stats if s[0] == "NaN")
+    assert nan_val == "2"
+
+
+def test_numeric_integer_no_nan_row():
+    series = pl.Series("val", [1, 2, 3])
+    stats = compute_column_stats(series)
+    labels = [s[0] for s in stats]
+    assert "NaN" not in labels
+
+
+def test_temporal_stats_with_nulls():
+    series = pl.Series("ts", [datetime.datetime(2024, 1, 1), None, datetime.datetime(2024, 12, 31)])
+    stats = compute_column_stats(series)
+    labels = [s[0] for s in stats]
+    assert "Null" in labels
+    null_val = next(s[1] for s in stats if s[0] == "Null")
+    assert null_val == "1"
+
+
+def test_categorical_stats_with_nulls():
+    series = pl.Series("cat", ["a", None, "b", None]).cast(pl.Categorical)
+    stats = compute_column_stats(series)
+    labels = [s[0] for s in stats]
+    assert "Null" in labels
+    null_val = next(s[1] for s in stats if s[0] == "Null")
+    assert null_val == "2"
+
+
 def test_unsupported_dtype_returns_empty():
     series = pl.Series("text", ["hello", "world"])
     stats = compute_column_stats(series)
