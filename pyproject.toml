@@ -42,6 +42,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = ["snapshot: visual snapshot regression tests (deselect with '-m not snapshot')"]
 
 [tool.mypy]
 ignore_missing_imports = true

@@ -1,8 +1,11 @@
 import polars as pl
+import pytest
 from textual.pilot import Pilot
 
 from dt_browser.browser import DtBrowserApp
 from dt_browser.custom_table import CustomTable
+
+pytestmark = pytest.mark.snapshot
 
 
 def _make_app(num_rows: int = 20) -> DtBrowserApp:

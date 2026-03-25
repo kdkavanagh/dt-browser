@@ -27,7 +27,10 @@ activate: .make.package_installed
 	@bash --init-file <(echo "$(ACTIVATE)")
 
 test: .make.package_installed | $(.VENV)
-	@$(ACTIVATE) && pytest tests/
+	@$(ACTIVATE) && pytest tests/ -m "not snapshot"
+
+test-snapshot: .make.package_installed | $(.VENV)
+	@$(ACTIVATE) && pytest tests/ -m snapshot
 
 check: .make.formatted .make.linted .make.typed
 
