@@ -68,6 +68,8 @@ TableWithBookmarks > .datatable--row-search-result {
         ["datatable--row-bookmark", "datatable--row-search-result"]
     )
 
+    _SEARCH_BG_COL = "__search_bg"
+
     active_search_queue: reactive[list[int] | None] = reactive(None)
 
     def __init__(self, *args, bookmarks: Bookmarks, **kwargs):
@@ -75,26 +77,58 @@ TableWithBookmarks > .datatable--row-search-result {
         self._bookmarks = bookmarks
         self._bookmark_highlight: Style = Style.null()
         self._search_highlight: Style = Style.null()
+        self._search_queue_set: frozenset[int] = frozenset()
+        self._has_search = False
+
+    def watch_active_search_queue(self, value: list[int] | None) -> None:
+        self._search_queue_set = frozenset(value) if value else frozenset()
+        self._has_search = bool(value)
 
     def on_mount(self):
         self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
         self._search_highlight = self.get_component_rich_style("datatable--row-search-result")
+        self._search_highlight_color = _color_name(self._search_highlight.bgcolor)
+
+    @property
+    def render_header_and_table(self):
+        was_cached = self._render_header_and_table is not None
+        result = super().render_header_and_table
+        # Pre-compute search background column once when viewport is rebuilt.
+        # This avoids any per-row overhead during partial scroll updates.
+        if not was_cached:
+            header, render_df = result
+            if not render_df.is_empty() and INDEX_COL in render_df.columns:
+                if self._has_search:
+                    visible_indices = set(render_df[INDEX_COL].to_list())
+                    viewport_hits = list(visible_indices & self._search_queue_set)
+                    if viewport_hits:
+                        search_bg_expr = (
+                            pl.when(pl.col(INDEX_COL).is_in(viewport_hits))
+                            .then(pl.lit(self._search_highlight_color))
+                            .otherwise(pl.lit(None))
+                            .alias(self._SEARCH_BG_COL)
+                        )
+                    else:
+                        search_bg_expr = pl.lit(None).cast(pl.Utf8).alias(self._SEARCH_BG_COL)
+                else:
+                    search_bg_expr = pl.lit(None).cast(pl.Utf8).alias(self._SEARCH_BG_COL)
+                render_df = render_df.with_columns(search_bg_expr)
+                self._render_header_and_table = (header, render_df)
+                result = self._render_header_and_table
+        return result
 
     def _get_sel_col_bg_color(self, struct: dict[str, Any]) -> str:
-        if self.active_search_queue and struct[INDEX_COL] in self.active_search_queue:
-            return _color_name(self._search_highlight.bgcolor)
+        search_bg = struct.get(self._SEARCH_BG_COL)
+        if search_bg is not None:
+            return search_bg
         if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
             return _color_name(self._bookmark_highlight.bgcolor)
         return super()._get_sel_col_bg_color(struct)
 
-    def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+    def _get_row_bg_color_expr(self, cursor_row_idx: int, render_df: pl.DataFrame | None = None) -> pl.Expr:
         tmp = super()._get_row_bg_color_expr(cursor_row_idx)
-        if self.active_search_queue:
-            tmp = (
-                pl.when(pl.col(INDEX_COL).is_in(self.active_search_queue))
-                .then(pl.lit(_color_name(self._search_highlight.bgcolor)))
-                .otherwise(tmp)
-            )
+        # Search highlights are pre-computed in the _SEARCH_BG_COL column
+        # and applied via _resolve_row_bgcolor to avoid per-row overhead.
         if self._bookmarks.has_bookmarks:
             tmp = (
                 pl.when(pl.col(INDEX_COL).is_in(self._bookmarks.meta_dt[INDEX_COL]))
@@ -102,6 +136,18 @@ TableWithBookmarks > .datatable--row-search-result {
                 .otherwise(tmp)
             )
         return tmp
+
+    def _resolve_row_bgcolor(self, struct: dict[str, Any]) -> str | None:
+        """Apply search highlight from pre-computed column.
+
+        Priority: bookmarks > search > cursor (base).
+        """
+        base = struct["bgcolor"]
+        if base is None:
+            search_bg = struct.get(self._SEARCH_BG_COL)
+            if search_bg is not None:
+                return search_bg
+        return base
 
 
 _ALREADY_DT = "dt"
