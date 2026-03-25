@@ -1,5 +1,6 @@
 import polars as pl
 from rich.table import Table as RichTable
+from textual import work
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
@@ -95,15 +96,7 @@ ColumnMetadata {
     def invalidate_cache(self) -> None:
         self._cache.clear()
 
-    def watch_column_info(self) -> None:
-        if self.column_info is None or self._source_df.is_empty():
-            return
-        col_name, _ = self.column_info
-        if col_name not in self._source_df.columns:
-            return
-        if col_name not in self._cache:
-            self._cache[col_name] = compute_column_stats(self._source_df[col_name])
-        stats = self._cache[col_name]
+    def _render_stats(self, col_name: str, stats: list[tuple[str, str]]) -> None:
         self.border_title = f"Column: {col_name}"
         if not stats:
             self._static.update("")
@@ -116,6 +109,26 @@ ColumnMetadata {
         self._static.update(table)
         if self.parent is not None and hasattr(self.parent, "update_width"):
             self.parent.update_width()
+
+    def watch_column_info(self) -> None:
+        if self.column_info is None or self._source_df.is_empty():
+            return
+        col_name, _ = self.column_info
+        if col_name not in self._source_df.columns:
+            return
+        if col_name in self._cache:
+            self._render_stats(col_name, self._cache[col_name])
+        else:
+            self.border_title = f"Column: {col_name}"
+            self._static.update("Computing...")
+            self._compute_stats(col_name)
+
+    @work(exclusive=True)
+    async def _compute_stats(self, col_name: str) -> None:
+        series = self._source_df[col_name]
+        stats = compute_column_stats(series)
+        self._cache[col_name] = stats
+        self._render_stats(col_name, stats)
 
     def compose(self):
         yield self._static
