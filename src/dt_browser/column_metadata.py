@@ -107,6 +107,8 @@ ColumnMetadata {
         for label, value in stats:
             table.add_row(label, value)
         self._static.update(table)
+        if self.parent is not None and hasattr(self.parent, "update_width"):
+            self.parent.update_width()
 
     def compose(self):
         yield self._static

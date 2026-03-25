@@ -288,13 +288,14 @@ RowDetail {
         assert self._schema is not None
         display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
-        target_width = self._dt.virtual_size.width + self.gutter.width + 1
-        if self.parent is not None:
-            self.parent.styles.width = target_width
-        else:
-            self.styles.width = target_width
         self._dt.refresh()
+        if isinstance(self.parent, DetailPanel):
+            self.parent.update_width()
         # self._dt.go_to_cell(coord)
+
+    @property
+    def content_width(self) -> int:
+        return self._dt.virtual_size.width + self.gutter.width + 1
 
     def compose(self):
         yield self._dt
@@ -303,7 +304,6 @@ RowDetail {
 class DetailPanel(Widget, can_focus=False):
     DEFAULT_CSS = """
 DetailPanel {
-    width: auto;
     max-width: 50%;
     min-width: 30%;
     layout: vertical;
@@ -314,6 +314,11 @@ DetailPanel {
         super().__init__(*args, **kwargs)
         self._row_detail = row_detail
         self._column_metadata = column_metadata
+
+    def update_width(self) -> None:
+        row_detail_width = self._row_detail.content_width if not self._row_detail.row_df.is_empty() else 0
+        meta_width = self._column_metadata.content_size.width + self._column_metadata.gutter.width
+        self.styles.width = max(row_detail_width, meta_width)
 
     def compose(self):
         yield self._row_detail
