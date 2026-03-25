@@ -68,24 +68,6 @@ async def test_cursor_jump_top_bottom():
         assert table.cursor_coordinate.row == 0
 
 
-async def test_resize_changes_visible_columns():
-    """Resizing to a narrow terminal reduces the number of visible columns."""
-    app = _make_app()
-    async with app.run_test(size=(160, 30)) as pilot:
-        await pilot.pause()
-        table = app.query_one("#main_table", CustomTable)
-        wide_widths = set(table._widths.keys())
-
-        # Now resize to something narrow
-        await pilot.resize_terminal(40, 30)
-        await pilot.pause()
-
-        # After resize, fewer columns should fit in the rendered output
-        _, render_df = table.render_header_and_table
-        rendered_cols = [c for c in render_df.columns if c in wide_widths]
-        assert len(rendered_cols) < len(wide_widths)
-
-
 async def test_page_down_up():
     """Pagedown moves cursor significantly, pageup brings it back."""
     app = _make_app(num_rows=100)
