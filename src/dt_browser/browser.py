@@ -250,6 +250,7 @@ class RowDetail(Widget, can_focus=False, can_focus_children=False):
     DEFAULT_CSS = """
 RowDetail {
     width: 100%;
+    height: 1fr;
     padding: 0 1;
     border: tall $primary;
 }

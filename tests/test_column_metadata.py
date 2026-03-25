@@ -113,7 +113,7 @@ def _make_mixed_app(num_rows: int = 30) -> DtBrowserApp:
 
 
 async def test_column_metadata_visible_on_start():
-    """Column metadata panel should be visible on app start."""
+    """Column metadata panel should be visible on app start and within viewport."""
     app = _make_mixed_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
@@ -121,6 +121,64 @@ async def test_column_metadata_visible_on_start():
         assert metadata is not None
         # Should show stats for the first column (Row # which is integer)
         assert metadata.column_info is not None
+        # Must be within the visible area
+        assert metadata.region.y + metadata.region.height <= 30, (
+            f"ColumnMetadata at y={metadata.region.y} h={metadata.region.height} is off-screen"
+        )
+        assert metadata.region.height > 0
+
+
+async def test_column_metadata_displays_numeric_stats():
+    """Verify numeric column stats are actually rendered in the widget."""
+    app = _make_mixed_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        metadata = app.query_one(ColumnMetadata)
+        # First column is Row # (numeric) — stats should be cached
+        col_name = metadata.column_info[0]
+        assert col_name in metadata._cache
+        stats = metadata._cache[col_name]
+        labels = [s[0] for s in stats]
+        assert "Min" in labels
+        assert "Median" in labels
+        assert "Max" in labels
+        # Border title should show column name
+        assert col_name in metadata.border_title
+
+
+async def test_column_metadata_displays_categorical_stats():
+    """Verify categorical column stats are rendered with value counts."""
+    app = _make_mixed_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        metadata = app.query_one(ColumnMetadata)
+        # Navigate to 'category' column (Row#, id, score, category)
+        for _ in range(3):
+            await pilot.press("right")
+            await pilot.pause()
+        assert metadata.column_info[0] == "category"
+        stats = metadata._cache["category"]
+        assert stats[0] == ("Unique values", "5")
+        # Should have value count entries
+        assert len(stats) == 6  # 1 header + 5 categories
+        assert "category" in metadata.border_title
+
+
+async def test_column_metadata_displays_boolean_stats():
+    """Verify boolean column stats show True/False counts."""
+    app = _make_mixed_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        metadata = app.query_one(ColumnMetadata)
+        # Navigate to 'active' column (Row#, id, score, category, active)
+        for _ in range(4):
+            await pilot.press("right")
+            await pilot.pause()
+        assert metadata.column_info[0] == "active"
+        stats = metadata._cache["active"]
+        labels = [s[0] for s in stats]
+        assert "True" in labels
+        assert "False" in labels
 
 
 async def test_column_metadata_updates_on_cursor_move():

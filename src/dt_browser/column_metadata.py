@@ -8,10 +8,10 @@ from textual.widgets import Static
 def _categorical_stats(series: pl.Series) -> list[tuple[str, str]]:
     n_unique = series.n_unique()
     stats: list[tuple[str, str]] = [("Unique values", str(n_unique))]
-    vc = series.value_counts().sort("count", descending=True).head(10)
-    col_name = vc.columns[0]
+    val_col = series.name
+    vc = series.value_counts().sort(["count", val_col], descending=[True, False]).head(10)
     for row in vc.iter_rows(named=True):
-        stats.append((f"  {row[col_name]}", str(row["count"])))
+        stats.append((f"  {row[val_col]}", str(row["count"])))
     return stats
 
 
