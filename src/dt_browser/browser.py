@@ -75,13 +75,23 @@ TableWithBookmarks > .datatable--row-search-result {
         self._bookmarks = bookmarks
         self._bookmark_highlight: Style = Style.null()
         self._search_highlight: Style = Style.null()
+        self._search_set: set[int] = set()
+        self._search_series: pl.Series | None = None
+
+    def watch_active_search_queue(self, queue: list[int] | None) -> None:
+        if queue:
+            self._search_set = set(queue)
+            self._search_series = pl.Series(INDEX_COL, queue)
+        else:
+            self._search_set = set()
+            self._search_series = None
 
     def on_mount(self):
         self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
         self._search_highlight = self.get_component_rich_style("datatable--row-search-result")
 
     def _get_sel_col_bg_color(self, struct: dict[str, Any]) -> str:
-        if self.active_search_queue and struct[INDEX_COL] in self.active_search_queue:
+        if self._search_set and struct[INDEX_COL] in self._search_set:
             return _color_name(self._search_highlight.bgcolor)
         if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
             return _color_name(self._bookmark_highlight.bgcolor)
@@ -89,9 +99,9 @@ TableWithBookmarks > .datatable--row-search-result {
 
     def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
         tmp = super()._get_row_bg_color_expr(cursor_row_idx)
-        if self.active_search_queue:
+        if self._search_series is not None:
             tmp = (
-                pl.when(pl.col(INDEX_COL).is_in(self.active_search_queue))
+                pl.when(pl.col(INDEX_COL).is_in(self._search_series))
                 .then(pl.lit(_color_name(self._search_highlight.bgcolor)))
                 .otherwise(tmp)
             )
