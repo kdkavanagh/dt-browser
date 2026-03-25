@@ -622,6 +622,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 )
             else:
                 cursor_col_idx = self.cursor_coordinate.column - self._dt.columns.index(visible_cols[0])
+                cursor_col_idx = max(0, min(cursor_col_idx, len(visible_cols) - 1))
 
                 cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
                 sel_col = visible_cols[cursor_col_idx]

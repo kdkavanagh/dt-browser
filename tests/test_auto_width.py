@@ -172,6 +172,30 @@ async def test_auto_width_with_resize():
         )
 
 
+async def test_auto_width_all_null_columns():
+    """Auto width does not crash when all visible columns have null values."""
+    df = pl.DataFrame(
+        {
+            "col_a": [None, None, None, None, None],
+            "col_b": [None, None, None, None, None],
+            "col_c": [None, None, None, None, None],
+        },
+        schema={"col_a": pl.Utf8, "col_b": pl.Utf8, "col_c": pl.Utf8},
+    )
+    app = DtBrowserApp("test", df)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#main_table", CustomTable)
+
+        # Switch to cell cursor mode then enable auto width
+        await pilot.press("w")
+        await pilot.pause()
+
+        # Should not crash — columns should be at least header-name width
+        for col in table._dt.columns:
+            assert table._widths[col] >= len(col)
+
+
 # --- Snapshot tests ---
 
 
