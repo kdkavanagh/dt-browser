@@ -27,7 +27,8 @@ dev = [
     "pylint",
     "pytest",
     "pytest-asyncio",
-    "pytest-textual-snapshot",
+    "pytest-textual-snapshot >= 1.1.0",
+    "syrupy >= 4.8.0, < 5",
     "ruff",
 ]
 
