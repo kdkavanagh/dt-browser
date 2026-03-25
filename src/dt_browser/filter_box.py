@@ -1,3 +1,4 @@
+import os
 import pathlib
 from dataclasses import dataclass
 
@@ -10,6 +11,12 @@ from textual.suggester import Suggester
 from textual.widgets import Input, Label, ListItem, ListView, Rule
 
 from dt_browser import HasState, ReceivesTableSelect
+
+
+def _default_history_file() -> pathlib.Path:
+    if env := os.environ.get("DT_BROWSER_HISTORY_FILE"):
+        return pathlib.Path(env)
+    return pathlib.Path("~/.cache/dtbrowser/filters.txt").expanduser()
 
 
 class FilterBox(ReceivesTableSelect, HasState):
@@ -54,7 +61,7 @@ FilterBox {
     def __init__(self, *args, suggestor: Suggester | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self._history: list[str] = []
-        self._history_file = pathlib.Path("~/.cache/dtbrowser/filters.txt").expanduser()
+        self._history_file = _default_history_file()
         self._history_file.parent.mkdir(exist_ok=True, parents=True)
         if self._history_file.exists():
             with self._history_file.open("r", encoding="utf-8") as f:

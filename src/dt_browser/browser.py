@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 import gc
 import pathlib
@@ -78,20 +77,13 @@ TableWithBookmarks > .datatable--row-search-result {
         self._search_highlight: Style = Style.null()
 
     def on_mount(self):
-        self._bookmark_highlight = self.get_component_rich_style(
-            "datatable--row-bookmark"
-        )
-        self._search_highlight = self.get_component_rich_style(
-            "datatable--row-search-result"
-        )
+        self._bookmark_highlight = self.get_component_rich_style("datatable--row-bookmark")
+        self._search_highlight = self.get_component_rich_style("datatable--row-search-result")
 
     def _get_sel_col_bg_color(self, struct: dict[str, Any]) -> str:
         if self.active_search_queue and struct[INDEX_COL] in self.active_search_queue:
             return _color_name(self._search_highlight.bgcolor)
-        if (
-            self._bookmarks.has_bookmarks
-            and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]
-        ):
+        if self._bookmarks.has_bookmarks and struct[INDEX_COL] in self._bookmarks.meta_dt[INDEX_COL]:
             return _color_name(self._bookmark_highlight.bgcolor)
         return super()._get_sel_col_bg_color(struct)
 
@@ -116,9 +108,7 @@ _ALREADY_DT = "dt"
 
 
 def _guess_timestamp_cols(df: pl.DataFrame):
-    date_range = pl.Series(
-        values=[datetime.date(2001, 1, 1), datetime.date(2042, 1, 1)]
-    )
+    date_range = pl.Series(values=[datetime.date(2001, 1, 1), datetime.date(2042, 1, 1)])
     epoch_units: tuple[Literal["s", "ms", "us", "ns"], ...] = ("s", "ms", "us", "ns")
     converts = [(x,) + tuple(date_range.dt.epoch(x)) for x in epoch_units]
 
@@ -133,12 +123,7 @@ def _guess_timestamp_cols(df: pl.DataFrame):
                     )
                     .select(
                         count=pl.col("is_inside").any()
-                        & (
-                            pl.any_horizontal(
-                                pl.col("is_zero"), pl.col("is_inside")
-                            ).sum()
-                            == pl.len()
-                        )
+                        & (pl.any_horizontal(pl.col("is_zero"), pl.col("is_inside")).sum() == pl.len())
                     )
                     .collect()
                     .get_column("count")[0]
@@ -234,9 +219,7 @@ class TableFooter(Footer):
             widths.append("auto")
             with Horizontal(classes="tablefooter--search"):
                 yield Label("Search: ")
-                yield ReactiveLabel().data_bind(
-                    value=TableFooter.active_search_idx_display
-                )
+                yield ReactiveLabel().data_bind(value=TableFooter.active_search_idx_display)
                 yield Label(" / ")
                 yield ReactiveLabel().data_bind(value=TableFooter.active_search_len)
 
@@ -254,11 +237,7 @@ class TableFooter(Footer):
         self.styles.grid_size_columns = len(widths)
 
     def compute_total_rows_display(self):
-        return (
-            f" (Filtered from {self.total_rows:,})"
-            if self.cur_total_rows != self.total_rows
-            else ""
-        )
+        return f" (Filtered from {self.total_rows:,})" if self.cur_total_rows != self.total_rows else ""
 
     def compute_active_search_idx_display(self):
         if self.active_search_idx is None:
@@ -297,28 +276,18 @@ RowDetail {
         if self.row_df.is_empty():
             return
         display_df = self.row_df.with_columns(
-            (
-                polars_list_to_string(pl.col(x))
-                if isinstance(dtype, pl.List)
-                else pl.col(x).cast(pl.Utf8)
-            )
+            (polars_list_to_string(pl.col(x)) if isinstance(dtype, pl.List) else pl.col(x).cast(pl.Utf8))
             for x, dtype in self.row_df.schema.items()
         ).transpose(include_header=True, header_name="Field", column_names=["Value"])
 
         if self._base_schema is None or self._base_schema != self.row_df.schema:
             self._base_schema = self.row_df.schema
-            self._schema = pl.from_dict(
-                {k: str(v) for k, v in self.row_df.schema.items()}, strict=False
-            ).transpose(
+            self._schema = pl.from_dict({k: str(v) for k, v in self.row_df.schema.items()}, strict=False).transpose(
                 include_header=True, header_name="Field", column_names=["dtype"]
             )
         assert self._schema is not None
-        display_df = display_df.join(self._schema, on=["Field"]).select(
-            ["Field", "dtype", "Value"]
-        )
-        self._dt.set_dt(
-            display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL])
-        )
+        display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
+        self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
         self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
         # self._dt.go_to_cell(coord)
@@ -342,9 +311,7 @@ def from_file_path(path: pathlib.Path, has_header: bool = True) -> pl.DataFrame:
     raise TypeError(f"Dont know how to load file type {path.suffix} for {path}")
 
 
-class DtBrowser(
-    Widget
-):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
+class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """A Textual app to manage stopwatches."""
 
     BINDINGS = [
@@ -397,35 +364,23 @@ class DtBrowser(
             else source_file_or_table
         )
         old_cols = bt.columns
-        bt = bt.with_row_index("Row #", offset=1).with_columns(
-            pl.col("Row #"), *old_cols
-        )
-        self.removed_cols = {
-            x: v for x, v in bt.schema.items() if not CustomTable.can_draw(bt[x])
-        }
+        bt = bt.with_row_index("Row #", offset=1).with_columns(pl.col("Row #"), *old_cols)
+        self.removed_cols = {x: v for x, v in bt.schema.items() if not CustomTable.can_draw(bt[x])}
         # bt = bt.with_columns(TestTs=datetime.datetime.now())
         self._display_dt = self._filtered_dt = self._original_dt = bt.select(
             [x for x in bt.columns if x not in self.removed_cols]
         )
-        self._meta_dt = self._original_meta = self._original_dt.with_row_index(
-            name=INDEX_COL
-        ).select([INDEX_COL])
+        self._meta_dt = self._original_meta = self._original_dt.with_row_index(name=INDEX_COL).select([INDEX_COL])
         self._table_name = table_name
         self._bookmarks = Bookmarks()
         self._suggestor = ColumnNameSuggestor()
         self.visible_columns = tuple(self._original_dt.columns)
         self.all_columns = self.visible_columns
         self.read_only_columns = self.all_columns
-        self._filter_box = FilterBox(
-            suggestor=self._suggestor, id="filter", classes="toolbox"
-        )
-        self._expression_box = ExpressionBox(
-            suggestor=self._suggestor, id="expr", classes="toolbox"
-        )
+        self._filter_box = FilterBox(suggestor=self._suggestor, id="filter", classes="toolbox")
+        self._expression_box = ExpressionBox(suggestor=self._suggestor, id="expr", classes="toolbox")
         self._select_interest: str | None = None
-        self._column_selector = ColumnSelector(
-            id=_SHOW_COLUMNS_ID, title="Show/Hide/Reorder Columns"
-        )
+        self._column_selector = ColumnSelector(id=_SHOW_COLUMNS_ID, title="Show/Hide/Reorder Columns")
         self._color_selector = ColumnSelector(
             allow_reorder=False,
             id=_COLOR_COLUMNS_ID,
@@ -433,9 +388,7 @@ class DtBrowser(
         )
 
         self._ts_cols = dict(_guess_timestamp_cols(self._original_dt))
-        self._ts_col_selector = ColumnSelector(
-            id=_TS_COLUMNS_ID, title="Select epoch timestamp columns"
-        )
+        self._ts_col_selector = ColumnSelector(id=_TS_COLUMNS_ID, title="Select epoch timestamp columns")
         self._ts_col_names: dict[str, str] = {}
         self.available_timestamp_columns = tuple(self._ts_cols.keys())
 
@@ -475,9 +428,7 @@ class DtBrowser(
         try:
             query = f"select {event.value} AS calc from dt"
             self._original_dt = self._original_dt.with_columns(
-                pl.Series((await ctx.execute(query).collect_async())["calc"]).alias(
-                    event.column_name
-                )
+                pl.Series((await ctx.execute(query).collect_async())["calc"]).alias(event.column_name)
             )
             if event.column_name not in self.all_columns:
                 self.visible_columns = self.visible_columns + (event.column_name,)
@@ -493,16 +444,14 @@ class DtBrowser(
                 timeout=10,
             )
         finally:
-            foot.pending_action = None
+            foot.pending_action = ""
 
     @on(ExpressionBox.ExpressionDeleted)
     async def remove_expression(self, event: ExpressionBox.ExpressionDeleted):
         if event.column_name not in self._original_dt.columns:
             return
         self._original_dt.drop_in_place(event.column_name)
-        self.visible_columns = tuple(
-            x for x in self.visible_columns if x != event.column_name
-        )
+        self.visible_columns = tuple(x for x in self.visible_columns if x != event.column_name)
         self.all_columns = tuple(x for x in self.all_columns if x != event.column_name)
         self.apply_filter()
         self.watch_cur_row()
@@ -518,20 +467,10 @@ class DtBrowser(
             )
         else:
             (foot := self.query_one(TableFooter)).filter_pending = True
-            ctx = pl.SQLContext(
-                frames={
-                    "dt": pl.concat(
-                        [self._original_dt, self._original_meta], how="horizontal"
-                    )
-                }
-            )
+            ctx = pl.SQLContext(frames={"dt": pl.concat([self._original_dt, self._original_meta], how="horizontal")})
             try:
-                query = self.current_filter.replace(" && ", " and ").replace(
-                    " || ", " or "
-                )
-                dt = await ctx.execute(
-                    f"select * from dt where {query}"
-                ).collect_async()
+                query = self.current_filter.replace(" && ", " and ").replace(" || ", " or ")
+                dt = await ctx.execute(f"select * from dt where {query}").collect_async()
                 meta = dt.select([x for x in dt.columns if x.startswith("__")])
                 dt = dt.select([x for x in dt.columns if not x.startswith("__")])
                 self.is_filtered = True
@@ -545,9 +484,7 @@ class DtBrowser(
                     self._set_filtered_dt(dt, meta, new_row=0)
             except Exception as e:
                 self.query_one(FilterBox).query_failed(query)
-                self.notify(
-                    f"Failed to apply filter due to: {e}", severity="error", timeout=10
-                )
+                self.notify(f"Failed to apply filter due to: {e}", severity="error", timeout=10)
                 self.current_filter = None
             foot.filter_pending = False
 
@@ -572,37 +509,23 @@ class DtBrowser(
         (foot := self.query_one(TableFooter)).search_pending = True
         try:
             idx_name = "__search_idx"
-            ctx = pl.SQLContext(
-                frames={"dt": self._display_dt.with_row_index(idx_name)}
-            )
+            ctx = pl.SQLContext(frames={"dt": self._display_dt.with_row_index(idx_name)})
             query = self.active_search.replace(" && ", " and ").replace(" || ", " or ")
             search_queue = list(
-                (
-                    await ctx.execute(
-                        f"select {idx_name} from dt where {query}"
-                    ).collect_async()
-                )[idx_name]
+                (await ctx.execute(f"select {idx_name} from dt where {query}").collect_async())[idx_name]
             )
 
             foot.search_pending = False
             if not search_queue:
-                self.notify(
-                    "No results found for search", severity="warning", timeout=5
-                )
+                self.notify("No results found for search", severity="warning", timeout=5)
             else:
                 self.active_search_queue = search_queue
                 self.active_search_idx = -1
                 if goto:
                     # Find the nearest index to the current cursor
-                    coord = self.query_one(
-                        "#main_table", CustomTable
-                    ).cursor_coordinate.row
+                    coord = self.query_one("#main_table", CustomTable).cursor_coordinate.row
                     next_row = next(
-                        (
-                            i
-                            for i, x in enumerate(self.active_search_queue)
-                            if x > coord
-                        ),
+                        (i for i, x in enumerate(self.active_search_queue) if x > coord),
                         0,
                     )
                     self.active_search_idx = next_row - 1
@@ -635,9 +558,7 @@ class DtBrowser(
 
     def action_toggle_bookmark(self):
         row_idx = self.query_one("#main_table", CustomTable).cursor_coordinate.row
-        did_add = self._bookmarks.toggle_bookmark(
-            self._display_dt[row_idx], self._meta_dt[row_idx]
-        )
+        did_add = self._bookmarks.toggle_bookmark(self._display_dt[row_idx], self._meta_dt[row_idx])
         self.refresh_bindings()
         self.query_one("#main_table", CustomTable).refresh(repaint=True, layout=True)
 
@@ -687,14 +608,10 @@ class DtBrowser(
             elif target.endswith(".csv"):
                 self._display_dt.write_csv(target)
             else:
-                self.notify(
-                    f"Dont know how to write file {target}", severity="error", timeout=5
-                )
+                self.notify(f"Dont know how to write file {target}", severity="error", timeout=5)
                 return
         except Exception as e:
-            self.notify(
-                f"Failed to save to {target} due to: {e}", severity="error", timeout=10
-            )
+            self.notify(f"Failed to save to {target} due to: {e}", severity="error", timeout=10)
             return
 
         size = pathlib.Path(target).stat().st_size
@@ -724,9 +641,7 @@ class DtBrowser(
     async def action_timestamp_selector(self):
         await self.query_one("#main_hori", Horizontal).mount(self._ts_col_selector)
 
-    def _set_filtered_dt(
-        self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs
-    ):
+    def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
         self._filtered_dt = filtered_dt
         self._meta_dt = filtered_meta
         self._set_active_dt(self._filtered_dt, **kwargs)
@@ -744,9 +659,7 @@ class DtBrowser(
         if self._display_dt.is_empty():
             self.show_row_detail = False
         self.watch_active_search(goto=False)
-        (table := self.query_one("#main_table", CustomTable)).set_dt(
-            self._display_dt, self._meta_dt
-        )
+        (table := self.query_one("#main_table", CustomTable)).set_dt(self._display_dt, self._meta_dt)
         if new_row is not None:
             table.move_cursor(row=new_row, column=None)
             self.cur_row = new_row
@@ -766,26 +679,19 @@ class DtBrowser(
 
     @work(exclusive=True)
     async def watch_timestamp_columns(self):
-        old_cols = [
-            v for k, v in self._ts_col_names.items() if k not in self.timestamp_columns
-        ]
+        old_cols = [v for k, v in self._ts_col_names.items() if k not in self.timestamp_columns]
         self._original_dt = self._original_dt.drop(old_cols)
         self._ts_col_names = {
-            x: f"{x} (ns)" if self._ts_cols[x] == _ALREADY_DT else f"{x} (Local)"
-            for x in self.timestamp_columns
+            x: f"{x} (ns)" if self._ts_cols[x] == _ALREADY_DT else f"{x} (Local)" for x in self.timestamp_columns
         }
         if self._ts_col_names:
-            (foot := self.query_one(TableFooter)).pending_action = (
-                "Computing Ts columns"
-            )
+            (foot := self.query_one(TableFooter)).pending_action = "Computing Ts columns"
             try:
                 calc_expr = [
                     (
                         pl.col(x).dt.epoch("ns")
                         if self._ts_cols[x] == _ALREADY_DT
-                        else pl.from_epoch(
-                            pl.col(x), time_unit=self._ts_cols[x]
-                        ).dt.convert_time_zone(_TIMEZONE)
+                        else pl.from_epoch(pl.col(x), time_unit=self._ts_cols[x]).dt.convert_time_zone(_TIMEZONE)
                     ).alias(self._ts_col_names[x])
                     for x in self.timestamp_columns
                 ]
@@ -824,9 +730,7 @@ class DtBrowser(
         coord = dt.cursor_coordinate
         sel_idx = event.selected_index
         if self.is_filtered:
-            filt = self._meta_dt.with_row_index("__displayIndex").filter(
-                pl.col(INDEX_COL) == sel_idx
-            )
+            filt = self._meta_dt.with_row_index("__displayIndex").filter(pl.col(INDEX_COL) == sel_idx)
             if filt.is_empty():
                 self.notify(
                     "Bookmark not present in filtered view.  Remove filters to select this bookmark",
@@ -883,19 +787,14 @@ class DtBrowser(
         if not (edtq := self.query_one("#main_table", CustomTable)):
             return False
 
-        if not edtq.has_focus and action in (
-            x.action if isinstance(x, Binding) else x[1] for x in DtBrowser.BINDINGS
-        ):
+        if not edtq.has_focus and action in (x.action if isinstance(x, Binding) else x[1] for x in DtBrowser.BINDINGS):
             return False
 
         match action:
             case "iter_search":
                 if not self.active_search_queue:
                     return False
-                if (
-                    bool(parameters[0])
-                    and self.active_search_idx == len(self.active_search_queue) - 1
-                ):
+                if bool(parameters[0]) and self.active_search_idx == len(self.active_search_queue) - 1:
                     return False
                 if not bool(parameters[0]) and self.active_search_idx == 0:
                     return False
@@ -924,14 +823,7 @@ class DtBrowser(
                             await self._original_dt.lazy()
                             .with_columns(
                                 __color=(
-                                    (
-                                        pl.any_horizontal(
-                                            *(
-                                                pl.col(x) != pl.col(x).shift(1)
-                                                for x in cols
-                                            )
-                                        )
-                                    )
+                                    (pl.any_horizontal(*(pl.col(x) != pl.col(x).shift(1) for x in cols)))
                                     .cum_sum()
                                     .fill_null(0)
                                     % len(COLORS.categories)
@@ -940,9 +832,7 @@ class DtBrowser(
                             .collect_async()
                         )[COLOR_COL],
                     )
-                self._original_meta = self._original_meta.with_columns(
-                    __color=self._color_by_cache.get(cols)
-                )
+                self._original_meta = self._original_meta.with_columns(__color=self._color_by_cache.get(cols))
                 self._meta_dt = (
                     await self._meta_dt.lazy()
                     .drop(COLOR_COL, strict=False)
@@ -984,9 +874,7 @@ class DtBrowser(
             selected_columns=DtBrowser.timestamp_columns,
             available_columns=DtBrowser.available_timestamp_columns,
         )
-        self._color_selector.data_bind(
-            selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns
-        )
+        self._color_selector.data_bind(selected_columns=DtBrowser.color_by, available_columns=DtBrowser.all_columns)
         self._column_selector.data_bind(
             selected_columns=DtBrowser.visible_columns,
             available_columns=DtBrowser.all_columns,
@@ -1011,9 +899,7 @@ class DtBrowser(
         )
 
 
-class DtBrowserApp(
-    App
-):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
+class DtBrowserApp(App):  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     def __init__(
         self,
         table_name: str | pathlib.Path,

@@ -25,4 +25,27 @@ jobs:
         with:
           python-version: "3.12"
       - run: make activate
-      - run: make test
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        run: |
+          source .venv/bin/activate
+          pytest tests/
+      - name: Snapshot report to summary
+        if: always()
+        run: |
+          if [ -f snapshot_report.html ]; then
+            echo "## Snapshot Test Report" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Snapshot differences were detected. Download the **snapshot-report** artifact for a detailed visual comparison." >> $GITHUB_STEP_SUMMARY
+          fi
+      - name: Upload snapshot report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-report
+          path: snapshot_report.html
+          if-no-files-found: ignore
+      - name: Fail if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
