@@ -3,7 +3,6 @@ import polars as pl
 from dt_browser.browser import DtBrowser, DtBrowserApp
 from dt_browser.custom_table import CustomTable
 from dt_browser.expression_box import ExpressionBox
-from dt_browser.filter_box import FilterBox
 
 
 def _make_app() -> DtBrowserApp:
@@ -44,6 +43,11 @@ async def test_compute_new_column():
         # Verify the computed values are correct
         doubled_col = browser._original_dt["doubled"]
         assert doubled_col.to_list() == [20, 40, 60, 80]
+
+        # Verify the column is visible in the rendered table
+        table = app.query_one("#main_table", CustomTable)
+        assert "doubled" in table._dt.columns
+        assert "doubled" in table._widths
 
 
 async def test_computed_column_usable_in_filter():
@@ -98,6 +102,13 @@ async def test_computed_column_as_input_for_further_expression():
 
         # Verify values
         assert browser._original_dt["quadrupled"].to_list() == [40, 80, 120, 160]
+
+        # Both computed columns should be visible in the rendered table
+        table = app.query_one("#main_table", CustomTable)
+        assert "doubled" in table._dt.columns
+        assert "quadrupled" in table._dt.columns
+        assert "doubled" in table._widths
+        assert "quadrupled" in table._widths
 
 
 async def test_expression_box_closes_on_escape():

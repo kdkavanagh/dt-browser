@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 import gc
 import pathlib

@@ -1,5 +1,4 @@
 import polars as pl
-from textual.coordinate import Coordinate
 
 from dt_browser.browser import DtBrowserApp
 from dt_browser.custom_table import CustomTable
@@ -55,7 +54,6 @@ async def test_resize_changes_visible_columns():
     async with app.run_test(size=(160, 30)) as pilot:
         await pilot.pause()
         table = app.query_one("#main_table", CustomTable)
-        all_cols = list(table._widths.keys())
         wide_visible = _visible_data_columns(table)
 
         # Now resize to something narrow

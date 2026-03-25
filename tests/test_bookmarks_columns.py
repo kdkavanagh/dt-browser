@@ -156,7 +156,6 @@ async def test_multiple_bookmarks_navigation():
     app = _make_app(num_rows=50)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        browser = app.query_one(DtBrowser)
         main_table = app.query_one("#main_table", CustomTable)
 
         # Bookmark row 0
