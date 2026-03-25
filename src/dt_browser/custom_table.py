@@ -605,7 +605,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self._render_header_and_table = (header, rend.collect())
         return self._render_header_and_table
 
-    def _get_row_bg_color_expr(self, cursor_row_idx: int) -> pl.Expr:
+    def _get_row_bg_color_expr(self, cursor_row_idx: int, render_df: pl.DataFrame | None = None) -> pl.Expr:
 
         return (
             pl.when(pl.col(DISPLAY_IDX_COL) == cursor_row_idx)
@@ -618,6 +618,14 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             )
             .otherwise(pl.lit(None))
         )
+
+    def _resolve_row_bgcolor(self, struct: dict[str, Any]) -> str | None:
+        """Hook for subclasses to adjust the row background color.
+
+        Called per row in _gen_segments after the Polars bgcolor expression is evaluated.
+        Default implementation returns the Polars-computed bgcolor unchanged.
+        """
+        return struct["bgcolor"]
 
     def _get_sel_col_bg_color(self, struct: dict[str, Any]):
         return (
@@ -641,10 +649,11 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             cursor_row_idx = self.cursor_coordinate.row - scroll_y
 
             for struct in (
-                rend.with_columns(self._get_row_bg_color_expr(cursor_row_idx).alias("bgcolor"))
+                rend.with_columns(self._get_row_bg_color_expr(cursor_row_idx, render_df=render_df).alias("bgcolor"))
                 .collect()
                 .iter_rows(named=True)
             ):
+                bgcolor = self._resolve_row_bgcolor(struct)
                 segs = [
                     Segment(
                         PADDING_STR,
@@ -657,7 +666,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                 )
                                 else None
                             ),
-                            bgcolor=struct["bgcolor"],
+                            bgcolor=bgcolor,
                         ),
                     ),
                     Segment(
@@ -671,7 +680,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                 )
                                 else struct[COLOR_COL]
                             ),
-                            bgcolor=struct["bgcolor"],
+                            bgcolor=bgcolor,
                         ),
                     ),
                     Segment(
@@ -700,7 +709,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                                 )
                                 else struct[COLOR_COL]
                             ),
-                            bgcolor=struct["bgcolor"],
+                            bgcolor=bgcolor,
                         ),
                     ),
                 ]
