@@ -329,6 +329,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         Binding("G", "last_row", "Jump to bottom", show=False),
         Binding("C", "show_colors", "Colors...", key_display="shift+C"),
         ("ctrl+s", "show_save", "Save dataframe as..."),
+        ("w", "toggle_auto_width", "Auto Width"),
     ]
 
     color_by: reactive[tuple[str, ...]] = reactive(tuple(), init=False)
@@ -570,6 +571,11 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     async def action_toggle_row_detail(self):
         self.show_row_detail = not self.show_row_detail
+
+    def action_toggle_auto_width(self) -> None:
+        table = self.query_one("#main_table", CustomTable)
+        table.auto_width = not table.auto_width
+        self.notify("Auto column width: " + ("ON" if table.auto_width else "OFF"), timeout=2)
 
     async def action_last_row(self):
         table = self.query_one("#main_table", CustomTable)

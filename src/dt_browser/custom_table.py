@@ -192,6 +192,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
     COMPONENT_CLASSES: ClassVar[set[str]] = {"datatable--header", "datatable--cursor", "datatable--even-row"}
 
     cursor_coordinate: Reactive[Coordinate] = Reactive(Coordinate(0, 0), repaint=False)
+    auto_width: Reactive[bool] = Reactive(False, repaint=False)
 
     def __init__(
         self,
@@ -221,6 +222,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
         self._render_header_and_table: tuple[Strip, pl.DataFrame] | None = None
         self._dirty = True
+        self._full_widths: dict[str, int] = {}
+        self._auto_width_visible_range: tuple[int, int] | None = None
 
         self.set_dt(dt, metadata_dt)
 
@@ -268,6 +271,8 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
         self._dt = dt
         self._metadata_dt = metadata_dt
         self._set_widths({x: max(len(x), self._measure(self._dt[x])) for x in self._dt.columns})
+        self._full_widths = self._widths.copy()
+        self._auto_width_visible_range = None
         self._render_header_and_table = None
         self._formatters = {x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns}
         self._build_header_contents()
@@ -281,6 +286,24 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             k: v - (self._widths[k] + COL_PADDING)
             for k, v in zip(self._dt.columns, accumulate(x + COL_PADDING for x in self._widths.values()), strict=False)
         }
+
+    def _compute_auto_widths(self, scroll_y: int, dt_height: int) -> dict[str, int]:
+        """Compute column widths based only on currently visible rows."""
+        widths = {}
+        for col in self._dt.columns:
+            visible_slice = self._dt[col].slice(scroll_y, dt_height)
+            data_width = self._measure(visible_slice) if len(visible_slice) > 0 else 0
+            widths[col] = max(len(col), data_width)
+        return widths
+
+    def watch_auto_width(self, value: bool) -> None:
+        if not value:
+            self._set_widths(self._full_widths)
+            self._formatters = {x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns}
+            self._build_header_contents()
+        self._auto_width_visible_range = None
+        self._render_header_and_table = None
+        self.refresh(repaint=True)
 
     def render_line(self, y, *_):
         if y >= len(self._lines):
@@ -357,6 +380,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
 
     def _ensure_cursor(self, allow_refresh: bool = True):
         self._render_header_and_table = None
+        self._auto_width_visible_range = None
 
         max_idx = self.cursor_coordinate.column
         while not self._is_col_visible(max_idx) and max_idx > 0:
@@ -496,10 +520,25 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             self._dirty = True
             scroll_x, scroll_y = self.scroll_offset
 
-            cols_to_render: list[str] = []
             effective_width = self.scrollable_content_region.width
             if effective_width <= 2:
                 return (Strip([]), pl.DataFrame())
+
+            dt_height = self.window_region.height - HEADER_HEIGHT
+
+            if self.auto_width:
+                visible_range = (scroll_y, dt_height)
+                if visible_range != self._auto_width_visible_range:
+                    self._auto_width_visible_range = visible_range
+                    new_widths = self._compute_auto_widths(scroll_y, dt_height)
+                    if new_widths != self._widths:
+                        self._set_widths(new_widths)
+                        self._formatters = {
+                            x: self._build_cast_expr(x, padding=self._widths[x]) for x in self._dt.columns
+                        }
+                        self._build_header_contents()
+
+            cols_to_render: list[str] = []
             truncate_last: int | None = None
             for x in self._dt.columns:
                 min_offset = self._cum_widths[x] - scroll_x
@@ -518,7 +557,6 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
             if not cols_to_render:
                 return (Strip([]), pl.DataFrame())
 
-            dt_height = self.window_region.height - HEADER_HEIGHT
             base_header, header_width = self._build_base_header(cols_to_render)
             excess = self.scrollable_content_region.width - header_width
             header = Strip(base_header + (self._header_pad * (excess)))
@@ -584,6 +622,7 @@ class CustomTable(ScrollView, can_focus=True, inherit_bindings=False):
                 )
             else:
                 cursor_col_idx = self.cursor_coordinate.column - self._dt.columns.index(visible_cols[0])
+                cursor_col_idx = max(0, min(cursor_col_idx, len(visible_cols) - 1))
 
                 cols_before_selected: list[str] = visible_cols[0:cursor_col_idx]
                 sel_col = visible_cols[cursor_col_idx]
