@@ -92,13 +92,13 @@ TableWithBookmarks > .datatable--row-search-result {
         tmp = super()._get_row_bg_color_expr(cursor_row_idx)
         if self.active_search_queue:
             tmp = (
-                pl.when(pl.col(INDEX_COL).is_in(self.active_search_queue))
+                pl.when(pl.col(INDEX_COL).is_in(pl.lit(pl.Series(self.active_search_queue))))
                 .then(pl.lit(_color_name(self._search_highlight.bgcolor)))
                 .otherwise(tmp)
             )
         if self._bookmarks.has_bookmarks:
             tmp = (
-                pl.when(pl.col(INDEX_COL).is_in(self._bookmarks.meta_dt[INDEX_COL]))
+                pl.when(pl.col(INDEX_COL).is_in(pl.lit(self._bookmarks.meta_dt[INDEX_COL])))
                 .then(pl.lit(_color_name(self._bookmark_highlight.bgcolor)))
                 .otherwise(tmp)
             )
