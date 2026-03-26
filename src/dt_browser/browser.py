@@ -28,6 +28,7 @@ from dt_browser import (
     SelectFromTable,
 )
 from dt_browser.bookmarks import Bookmarks
+from dt_browser.column_metadata import ColumnMetadata
 from dt_browser.column_selector import ColumnSelector
 from dt_browser.custom_table import CustomTable, _color_name, polars_list_to_string
 from dt_browser.expression_box import ExpressionBox
@@ -248,9 +249,8 @@ class TableFooter(Footer):
 class RowDetail(Widget, can_focus=False, can_focus_children=False):
     DEFAULT_CSS = """
 RowDetail {
-    width: auto;
-    max_width: 50%;
-    min_width: 30%;
+    width: 100%;
+    height: 1fr;
     padding: 0 1;
     border: tall $primary;
 }
@@ -288,12 +288,41 @@ RowDetail {
         assert self._schema is not None
         display_df = display_df.join(self._schema, on=["Field"]).select(["Field", "dtype", "Value"])
         self._dt.set_dt(display_df, display_df.with_row_index(name=INDEX_COL).select([INDEX_COL]))
-        self.styles.width = self._dt.virtual_size.width + self.gutter.width + 1
         self._dt.refresh()
+        if isinstance(self.parent, DetailPanel):
+            self.parent.update_width()
         # self._dt.go_to_cell(coord)
+
+    @property
+    def content_width(self) -> int:
+        return self._dt.virtual_size.width + self.gutter.width + 1
 
     def compose(self):
         yield self._dt
+
+
+class DetailPanel(Widget, can_focus=False):
+    DEFAULT_CSS = """
+DetailPanel {
+    max-width: 50%;
+    min-width: 30%;
+    layout: vertical;
+}
+"""
+
+    def __init__(self, row_detail: RowDetail, column_metadata: ColumnMetadata, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._row_detail = row_detail
+        self._column_metadata = column_metadata
+
+    def update_width(self) -> None:
+        row_detail_width = self._row_detail.content_width if not self._row_detail.row_df.is_empty() else 0
+        meta_width = self._column_metadata.content_size.width + self._column_metadata.gutter.width
+        self.styles.width = max(row_detail_width, meta_width)
+
+    def compose(self):
+        yield self._row_detail
+        yield self._column_metadata
 
 
 def from_file_path(path: pathlib.Path, has_header: bool = True) -> pl.DataFrame:
@@ -343,6 +372,7 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     current_filter = reactive[str | None](None)
 
     cur_row = reactive(0)
+    cur_col = reactive(0)
     cur_total_rows = reactive(0)
     total_rows = reactive(0)
 
@@ -401,6 +431,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self._ts_col_selector.styles.width = 1
 
         self._row_detail = RowDetail()
+        self._column_metadata = ColumnMetadata()
+        self._column_metadata.set_source_df(self._filtered_dt)
+        self._detail_panel = DetailPanel(self._row_detail, self._column_metadata)
 
         self._color_by_cache: LRUCache[tuple[str, ...], pl.Series] = LRUCache(5)
         self._last_message_ts = time.time()
@@ -629,10 +662,10 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
 
     async def watch_show_row_detail(self):
         if not self.show_row_detail:
-            if existing := self.query(RowDetail):
+            if existing := self.query(DetailPanel):
                 existing.remove()
         elif not self._display_dt.is_empty():
-            await self.query_one("#main_hori", Horizontal).mount(self._row_detail)
+            await self.query_one("#main_hori", Horizontal).mount(self._detail_panel)
 
     async def action_show_bookmarks(self):
         await self.mount(self._bookmarks, before=self.query_one(TableFooter))
@@ -650,6 +683,8 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     def _set_filtered_dt(self, filtered_dt: pl.DataFrame, filtered_meta: pl.DataFrame, **kwargs):
         self._filtered_dt = filtered_dt
         self._meta_dt = filtered_meta
+        self._column_metadata.set_source_df(self._filtered_dt)
+        self._column_metadata.invalidate_cache()
         self._set_active_dt(self._filtered_dt, **kwargs)
 
     def _set_active_dt(self, active_dt: pl.DataFrame, new_row: int | None = None):
@@ -720,9 +755,19 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
     @on(CustomTable.CellHighlighted, selector="#main_table")
     async def handle_cell_highlight(self, event: CustomTable.CellHighlighted):
         self.cur_row = event.coordinate.row
+        col = event.coordinate.column
+        if col != self.cur_col:
+            self.cur_col = col
 
     def watch_cur_row(self):
         self._row_detail.row_df = self._display_dt[self.cur_row]
+
+    def watch_cur_col(self):
+        if self._display_dt.is_empty() or self.cur_col >= len(self._display_dt.columns):
+            return
+        col_name = self._display_dt.columns[self.cur_col]
+        dtype = self._display_dt.schema[col_name]
+        self._column_metadata.column_info = (col_name, dtype)
 
     @on(CustomTable.CellSelected, selector="#main_table")
     def handle_cell_select(self, event: CustomTable.CellSelected):
@@ -863,6 +908,9 @@ class DtBrowser(Widget):  # pylint: disable=too-many-public-methods,too-many-ins
         self.cur_total_rows = len(self._display_dt)
         self.total_rows = len(self._original_dt)
         self._row_detail.row_df = self._display_dt[0]
+        if not self._display_dt.is_empty():
+            col_name = self._display_dt.columns[0]
+            self._column_metadata.column_info = (col_name, self._display_dt.schema[col_name])
         if self.removed_cols:
             err_str = ", ".join(f"{k}: {v}" for k, v in self.removed_cols.items())
             self.notify(
